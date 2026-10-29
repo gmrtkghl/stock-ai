@@ -1,0 +1,8 @@
+streamlit==1.66.1
+yfinance==1.7.0
+pandas>=2.2,<3
+numpy>=1.26,<3
+plotly==6.9.0
+requests>=2.32,<3
+tzdata>=2025.1
+streamlit-local-storage

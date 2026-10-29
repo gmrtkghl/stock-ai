@@ -1,0 +1,13 @@
+주식 리서치 노트 v11 클라우드판 검증 메모
+
+- Python 문법 검사: app.py, streamlit_app.py, cloud_analysis.py, cloud_storage.py, portfolio_view.py 통과
+- 클라우드 분석/저장 파서 단위 테스트: 4/4 통과
+- 데이터 저장 설계: 서버 파일 대신 브라우저 localStorage 사용
+- 포트폴리오 저장 콜백: 클라우드에서는 cloud_storage.save_positions 사용
+- 관심종목 저장: 클라우드에서는 cloud_storage.save_watchlist 사용
+- 모바일 레이아웃: 기존 768px 이하 단일열 CSS 유지
+- 기본 진입: 오늘의 이슈
+- 생성형 AI: 포함하지 않음. API 없는 규칙 기반 자동 분석으로 대체
+
+현재 작업 환경의 제약으로 실제 Streamlit Community Cloud 배포 및 iPhone Safari 실기 접속은 실행하지 못했습니다.
+Community Cloud 배포 후 최초에는 시세/뉴스 네트워크 응답과 streamlit-local-storage 구성요소 동작을 확인하세요.

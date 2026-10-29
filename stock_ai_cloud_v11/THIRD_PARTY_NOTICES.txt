@@ -1,0 +1,27 @@
+주식 리서치 노트 — 포함 구성요소 안내
+
+이 Windows 배포본은 공식 CPython Windows embeddable 배포판과 PyPI에 게시된
+Windows 또는 플랫폼 공통 Python wheel을 포함합니다.
+해당 구성요소에는 각 권리자의 저작권 및 라이선스가 적용됩니다.
+외부 구성요소의 라이선스·고지 파일과 패키지 메타데이터를 유지했습니다.
+
+- CPython: runtime/LICENSE.txt
+- Python 패키지: runtime/Lib/site-packages 안의 각 *.dist-info/ 디렉터리,
+  LICENSE, COPYING, NOTICE, licenses/ 등 원래 파일
+- Streamlit 정적 화면 구성요소의 고지: streamlit 패키지 안의 원래 고지 파일
+- 버전, 다운로드 출처 및 SHA-256: BUNDLED_PACKAGES.json
+
+Ollama 실행기와 qwen3 모델 가중치는 이 배포본에 포함되어 있지 않습니다.
+선택적 AI 준비 도구를 실행하면 공식 설치 안내와 로컬 모델 준비 절차를 제공합니다.
+Ollama 및 모델의 라이선스는 해당 공식 배포처에 적용됩니다.
+
+시세와 뉴스는 각 사용자 PC에서 외부 제공처에 조회합니다.
+앱의 코드 공유와 시세·뉴스 데이터의 재배포 허용 범위는 별개입니다.
+사용 범위는 원 제공처의 조건을 확인하세요.
+
+공식 프로젝트:
+Python: https://www.python.org/
+Streamlit: https://streamlit.io/
+yfinance: https://ranaroussi.github.io/yfinance/
+Ollama: https://ollama.com/
+
