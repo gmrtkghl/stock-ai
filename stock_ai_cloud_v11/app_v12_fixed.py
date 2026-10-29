@@ -128,6 +128,26 @@ h1,h2,h3 {letter-spacing:-.035em;}
 [data-testid="stVerticalBlockBorderWrapper"]>div {border-radius:16px;}
 .eyebrow {font-size:.76rem;letter-spacing:.14em;color:#4C8175;font-weight:700;}
 .intro {color:#61766F;margin-top:-.6rem;margin-bottom:1.4rem;}
+/* 메인 화면의 오늘 이슈 새로고침 버튼은 항상 높은 대비로 표시한다. */
+.st-key-issue_refresh button {
+  background:#11131F !important;
+  border-color:#11131F !important;
+  color:#FFFFFF !important;
+}
+.st-key-issue_refresh button *,
+.st-key-issue_refresh button p,
+.st-key-issue_refresh button span {
+  color:#FFFFFF !important;
+  opacity:1 !important;
+}
+.st-key-issue_refresh button:hover {
+  background:#202538 !important;
+  border-color:#202538 !important;
+}
+.st-key-issue_refresh button:focus,
+.st-key-issue_refresh button:active {
+  color:#FFFFFF !important;
+}
 @media (max-width: 768px) {
   html, body {margin:0 !important; padding:0 !important; max-width:100vw !important; overflow-x:hidden !important;}
   .stApp {margin:0 !important; padding:0 !important; width:100vw !important; max-width:100vw !important; overflow-x:hidden !important;}
