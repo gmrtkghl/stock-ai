@@ -67,7 +67,63 @@ st.markdown("""
 .stApp {background:#F7F9F6; color:#203A35;}
 .block-container {padding-top:2.1rem; padding-bottom:3rem; max-width:1480px;}
 h1,h2,h3 {letter-spacing:-.035em;}
-[data-testid="stSidebar"] {background:#EDF3EE;}
+[data-testid="stSidebar"] {
+  background:#F1F5F2 !important;
+  color:#203A35 !important;
+}
+[data-testid="stSidebar"] > div:first-child {
+  background:#F1F5F2 !important;
+}
+/* 사이드바: iPhone에서도 충분한 명암 대비를 유지한다. */
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] h4,
+[data-testid="stSidebar"] h5,
+[data-testid="stSidebar"] h6,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] [role="radiogroup"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] .stCaption p {
+  color:#203A35 !important;
+  opacity:1 !important;
+  text-shadow:none !important;
+}
+[data-testid="stSidebar"] .stCaption p,
+[data-testid="stSidebar"] small {
+  color:#536A63 !important;
+}
+[data-testid="stSidebar"] input,
+[data-testid="stSidebar"] textarea {
+  color:#203A35 !important;
+  background:#FFFFFF !important;
+  caret-color:#203A35 !important;
+}
+[data-testid="stSidebar"] input::placeholder,
+[data-testid="stSidebar"] textarea::placeholder {
+  color:#7A8D87 !important;
+  opacity:1 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+  background:#FFFFFF !important;
+  color:#203A35 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] span {
+  color:#203A35 !important;
+}
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"],
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] * {
+  color:#FFFFFF !important;
+}
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"],
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] * {
+  color:#203A35 !important;
+}
+[data-testid="stSidebar"] [data-baseweb="tag"],
+[data-testid="stSidebar"] [data-baseweb="tag"] * {
+  color:#FFFFFF !important;
+}
 [data-testid="stMetricValue"] {font-size:1.65rem;}
 [data-testid="stVerticalBlockBorderWrapper"]>div {border-radius:16px;}
 .eyebrow {font-size:.76rem;letter-spacing:.14em;color:#4C8175;font-weight:700;}
