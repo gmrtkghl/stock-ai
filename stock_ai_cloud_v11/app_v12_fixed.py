@@ -93,12 +93,22 @@ h1,h2,h3 {letter-spacing:-.035em;}
     max-width:0 !important;
     margin:0 !important;
     padding:0 !important;
-    overflow:visible !important;
+    overflow:hidden !important;
+    visibility:hidden !important;
+    pointer-events:none !important;
+    transform:translateX(-110%) !important;
   }
   [data-testid="stSidebar"][aria-expanded="false"] > div:first-child {
     width:0 !important;
     min-width:0 !important;
     max-width:0 !important;
+    overflow:hidden !important;
+  }
+  [data-testid="stSidebar"][aria-expanded="true"] {
+    visibility:visible !important;
+    pointer-events:auto !important;
+    overflow:auto !important;
+    transform:none !important;
   }
 
   /* Streamlit 버전에 따라 main/header에 남는 sidebar offset을 모두 제거한다. */
