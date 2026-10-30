@@ -724,9 +724,21 @@ def _friendly_sector_label(value):
     return aliases.get(text, text)
 
 
-def _sector_list_html(values):
+def _sector_list_html(values, limit=4):
+    # Older/stale analysis results may contain a single sector name as a string.
+    # Iterating a string would split Korean text into individual characters, so
+    # always normalize to a list before applying the display limit.
+    if values is None:
+        normalized = []
+    elif isinstance(values, str):
+        normalized = [values]
+    elif isinstance(values, (list, tuple, set)):
+        normalized = list(values)
+    else:
+        normalized = [values]
+
     rows = []
-    for value in values:
+    for value in normalized[:max(1, int(limit))]:
         label = _friendly_sector_label(value)
         if label:
             rows.append(f"<li>{html.escape(label)}</li>")
@@ -766,7 +778,7 @@ def render_sector_impact_cards(impacts, title="오늘 토픽이 업종에 줄 �
                 if beneficiaries:
                     st.markdown(
                         '<div class="sector-impact-box benefit"><strong>✅ 호재가 될 수 있는 업종</strong>'
-                        + _sector_list_html(beneficiaries[:4]) + '</div>',
+                        + _sector_list_html(beneficiaries, limit=4) + '</div>',
                         unsafe_allow_html=True,
                     )
                 else:
@@ -778,7 +790,7 @@ def render_sector_impact_cards(impacts, title="오늘 토픽이 업종에 줄 �
                 if risks:
                     st.markdown(
                         '<div class="sector-impact-box risk"><strong>⚠️ 불리할 수 있는 업종</strong>'
-                        + _sector_list_html(risks[:3]) + '</div>',
+                        + _sector_list_html(risks, limit=3) + '</div>',
                         unsafe_allow_html=True,
                     )
                 if item.get('rationale'):
