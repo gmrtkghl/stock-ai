@@ -421,7 +421,7 @@ _PROFILE_STATE_KEYS = {
     "pending_symbol", "position_notice", "instrument_search", "selected_search_symbol",
     "portfolio_selection", "price_selection", "sector_selection", "stock_news_selection",
     "stock_ai_selection", "ai_result", "dashboard_ai_result", "market_impact_result",
-    "research_ai_result", "sector_issue_review", "sector_issue_review",
+    "research_ai_result", "sector_issue_review", "buy_candidate_result",
 }
 
 
@@ -1671,6 +1671,296 @@ def render_ai_research_dashboard(active_symbols):
         "실적 발표, 공시, 정책 변화, 장중 급변 등 새로운 정보가 나오면 판단이 달라질 수 있습니다."
     )
 
+
+
+def _sector_values_for_screen(value):
+    """Normalize one/many sector labels without splitting a Korean string by character."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(x).strip() for x in value if str(x or "").strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _rank_issue_sectors(market):
+    """Rank sector candidates from today's topic impacts. Scores are relative, not probabilities."""
+    brief, _ = cai.generate_dashboard_brief({"market": market, "stocks": []})
+    impacts = (brief or {}).get("sector_impacts") or []
+    confidence_weight = {"높음": 1.0, "중간": 0.68, "낮음": 0.32}
+    rows = {}
+    for impact in impacts:
+        count = max(1, int(impact.get("topic_count") or 0))
+        conf = confidence_weight.get(str(impact.get("confidence") or "낮음"), 0.32)
+        # Log-like cap prevents one very frequent topic from dominating everything.
+        topic_weight = conf * min(2.4, 0.75 + math.log1p(count) / 2.2)
+        topic_text = f"{impact.get('region') or '시장'} · {impact.get('topic') or '토픽'} · {impact.get('signal') or '방향 불명확'}"
+        for sector in _sector_values_for_screen(impact.get("beneficiary_sectors")):
+            row = rows.setdefault(sector, {"sector": sector, "score": 0.0, "positive": [], "negative": []})
+            row["score"] += topic_weight
+            row["positive"].append(topic_text)
+        for sector in _sector_values_for_screen(impact.get("risk_sectors")):
+            row = rows.setdefault(sector, {"sector": sector, "score": 0.0, "positive": [], "negative": []})
+            row["score"] -= topic_weight * 0.9
+            row["negative"].append(topic_text)
+
+    ranked = [row for row in rows.values() if row["score"] > 0.15]
+    ranked.sort(key=lambda x: (x["score"], len(x["positive"])), reverse=True)
+    for row in ranked:
+        support = len(row["positive"])
+        row["confidence"] = "높음" if row["score"] >= 2.2 and support >= 2 else "중간" if row["score"] >= 1.0 else "낮음"
+        row["label"] = _friendly_sector_label(row["sector"])
+    return ranked[:8]
+
+
+def _buy_candidate_symbol_review(symbol, position, market):
+    known = KNOWN.get(symbol, {})
+    profile = profile_cached(symbol)
+    quote = quote_cached(symbol)
+    history, history_error = history_cached(symbol)
+    summary = md.summary_from_history(history) if history is not None and not history.empty else None
+    name = known.get("name") or profile.get("name") or symbol
+    kind = known.get("kind") or profile.get("kind") or ("index" if symbol.startswith("^") else "stock")
+    news = news_cached(symbol, name)
+    fund = None
+    fund_symbol = None
+    if kind == "etf" or symbol == "^GSPC":
+        fund_symbol = "VOO" if symbol == "^GSPC" else symbol
+        fund = fund_cached(fund_symbol)
+    evaluated = pf.evaluate_position(position, quote) if position else None
+    snapshot = {
+        "symbol": symbol,
+        "name": name,
+        "kind": kind,
+        "sector": profile.get("sector"),
+        "industry": profile.get("industry"),
+        "quote": quote,
+        "analysis": summary,
+        "position": evaluated,
+        "news": news,
+        "fund_sectors": (fund or {}).get("sectors") or {},
+        "fund_composition": {
+            "symbol": fund_symbol,
+            "is_proxy": symbol == "^GSPC",
+            "sectors": (fund or {}).get("sectors") or {},
+            "asof": (fund or {}).get("asof"),
+        } if fund_symbol else None,
+    }
+    result, warning = cai.generate_issue_stock_review(snapshot, market)
+    return {
+        "symbol": symbol,
+        "name": name,
+        "kind": kind,
+        "held": bool(position),
+        "profile": profile,
+        "quote": quote,
+        "summary": summary,
+        "result": result,
+        "warning": warning,
+        "history_error": history_error,
+    }
+
+
+def _generate_buy_candidate_package(active_symbols, market):
+    positions = dict(st.session_state.positions)
+    rows = []
+    if active_symbols:
+        with ThreadPoolExecutor(max_workers=min(4, max(1, len(active_symbols)))) as pool:
+            futures = [pool.submit(_buy_candidate_symbol_review, symbol, positions.get(symbol), market) for symbol in active_symbols]
+            for future in futures:
+                try:
+                    row = future.result()
+                except Exception:
+                    continue
+                if row.get("result"):
+                    rows.append(row)
+    rows.sort(key=lambda x: float((x.get("result") or {}).get("combined_score") or -99), reverse=True)
+    return {
+        "created": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"),
+        "market_fetched_at": market.get("fetched_at"),
+        "symbols": list(active_symbols),
+        "sectors": _rank_issue_sectors(market),
+        "stocks": rows,
+    }
+
+
+def _render_buy_sector_chart(sectors):
+    top = sectors[:6]
+    if not top:
+        return
+    figure = go.Figure(go.Bar(
+        x=[float(x.get("score") or 0) for x in top][::-1],
+        y=[str(x.get("label") or x.get("sector") or "섹터") for x in top][::-1],
+        orientation="h",
+        text=[f"{float(x.get('score') or 0):.2f}" for x in top][::-1],
+        textposition="auto",
+        hovertemplate="%{y}<br>이슈 상대점수 %{x:.2f}<extra></extra>",
+    ))
+    figure.update_layout(
+        height=300 if MOBILE_UI else 340,
+        margin=dict(l=10, r=20, t=10, b=10),
+        template="plotly_white",
+        xaxis_title="이슈 상대점수 · 확률이 아님",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+    )
+    st.plotly_chart(figure, width="stretch", key="buy_sector_ranking")
+
+
+def _render_buy_stock_chart(stock_rows):
+    top = stock_rows[:5]
+    if not top:
+        return
+    figure = go.Figure(go.Bar(
+        x=[float((x.get("result") or {}).get("combined_score") or 0) for x in top][::-1],
+        y=[str(x.get("name") or x.get("symbol")) for x in top][::-1],
+        orientation="h",
+        text=[f"{float((x.get('result') or {}).get('combined_score') or 0):+.2f}" for x in top][::-1],
+        textposition="auto",
+        hovertemplate="%{y}<br>종합 참고점수 %{x:+.2f}<extra></extra>",
+    ))
+    figure.update_layout(
+        height=270 if MOBILE_UI else 315,
+        margin=dict(l=10, r=20, t=10, b=10),
+        template="plotly_white",
+        xaxis_title="종합 참고점수 · +는 우호적 / -는 부담",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+    )
+    st.plotly_chart(figure, width="stretch", key="buy_stock_ranking")
+
+
+def render_buy_candidates_dashboard(active_symbols):
+    st.markdown('<div class="eyebrow">BUY CANDIDATE SCREEN</div>', unsafe_allow_html=True)
+    st.title("🎯 매수 추천 후보")
+    st.markdown(
+        '<div class="intro">오늘의 시장 이슈에서 상대적으로 우호적인 섹터를 찾고, 관심종목·ETF 중 가격·기술·뉴스까지 함께 우호적인 매수 검토 후보를 선별합니다.</div>',
+        unsafe_allow_html=True,
+    )
+    st.info(
+        "이 화면의 ‘추천’은 자동 주문이나 수익 보장이 아니라 매수 검토 후보를 좁히는 스크리닝입니다. "
+        "섹터 점수는 확률이 아니며, 종목 후보는 현재 관심·보유 목록 안에서만 비교합니다."
+    )
+
+    head = st.columns([3, 1])
+    head[0].caption("시장 뉴스 약 100건의 토픽 방향 → 섹터 영향 → 종목 가격·기술 → 종목 뉴스 순으로 후보를 좁힙니다.")
+    refresh = head[1].button("후보 다시 분석", type="primary", width="stretch", key="buy_candidate_refresh")
+
+    with st.spinner("오늘 이슈를 기준으로 추천 섹터를 계산하고 있습니다…"):
+        market = market_brief_cached()
+    current_stamp = market.get("fetched_at")
+    saved = st.session_state.get("buy_candidate_result") or {}
+    stale = saved.get("market_fetched_at") != current_stamp or set(saved.get("symbols") or []) != set(active_symbols)
+
+    if refresh or not saved or stale:
+        with st.spinner("섹터와 관심종목·ETF를 같은 기준으로 비교하고 있습니다…"):
+            saved = _generate_buy_candidate_package(tuple(active_symbols), market)
+        st.session_state.buy_candidate_result = saved
+
+    sectors = saved.get("sectors") or []
+    st.subheader("1. 오늘 이슈 기반 추천 섹터")
+    if sectors:
+        _render_buy_sector_chart(sectors)
+        top3 = st.columns(min(3, len(sectors)))
+        for col, item in zip(top3, sectors[:3]):
+            with col.container(border=True):
+                st.caption(f"이슈 우호도 · {item.get('confidence') or '낮음'}")
+                st.subheader(item.get("label") or item.get("sector") or "섹터")
+                st.metric("상대점수", f"{float(item.get('score') or 0):.2f}", delta_color="off")
+                with st.expander("왜 후보인가"):
+                    for line in (item.get("positive") or [])[:4]:
+                        st.write(f"• 우호 토픽 · {line}")
+                    for line in (item.get("negative") or [])[:3]:
+                        st.write(f"• 반대 토픽 · {line}")
+        st.caption("섹터 상대점수는 오늘 뉴스 토픽의 빈도·방향·확신도를 합친 내부 비교값입니다. 수익률 확률이나 목표수익률이 아닙니다.")
+    else:
+        st.info("현재 뉴스 방향만으로 뚜렷하게 우호적인 섹터 후보를 만들기 어렵습니다.")
+
+    st.divider()
+    st.subheader("2. 관심종목·ETF 매수 검토 후보")
+    if not active_symbols:
+        st.info("관심종목을 추가하면 이곳에서 종목·ETF 후보를 가격·기술·뉴스까지 포함해 비교합니다.")
+        return
+
+    all_stock_rows = saved.get("stocks") or []
+    # A positive score alone is not enough to call something a buy candidate.
+    candidates = [
+        row for row in all_stock_rows
+        if float((row.get("result") or {}).get("combined_score") or 0) >= 0.75
+        and str((row.get("result") or {}).get("direction") or "") != "하락 우세"
+    ][:5]
+    if not candidates:
+        st.info("현재 기준에서는 매수 후보로 올릴 만큼 우호적인 종목·ETF가 없습니다. 관망도 정상적인 결과입니다.")
+        if all_stock_rows:
+            st.caption("가장 높은 종목도 기준점에 못 미쳐 추천 후보에서 제외했습니다.")
+        return
+
+    _render_buy_stock_chart(candidates)
+    table_rows = []
+    for rank, row in enumerate(candidates, 1):
+        result = row.get("result") or {}
+        quote = row.get("quote") or {}
+        summary = row.get("summary") or {}
+        stance = result.get("stance") or "관망"
+        grade = "우선 검토" if stance == "매수 검토" and result.get("direction") == "상승 우세" else "관찰 후보"
+        table_rows.append({
+            "순위": rank,
+            "종목": row.get("name") or row.get("symbol"),
+            "티커": row.get("symbol"),
+            "구분": "보유 중" if row.get("held") else "신규 후보",
+            "후보 등급": grade,
+            "매매 검토": stance,
+            "방향": result.get("direction") or "혼조·중립",
+            "확신도": result.get("confidence") or "낮음",
+            "종합점수": float(result.get("combined_score") or 0),
+            "20일": float(summary.get("return_20d_pct")) if is_number(summary.get("return_20d_pct")) else None,
+            "당일": float(quote.get("change_pct")) if is_number(quote.get("change_pct")) else None,
+        })
+    st.dataframe(
+        pd.DataFrame(table_rows),
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "종합점수": st.column_config.NumberColumn("종합점수", format="%+.2f"),
+            "20일": st.column_config.NumberColumn("20일", format="%+.2f%%"),
+            "당일": st.column_config.NumberColumn("당일", format="%+.2f%%"),
+        },
+    )
+
+    st.markdown("### 3. 후보별 근거와 경계요인")
+    for rank, row in enumerate(candidates, 1):
+        result = row.get("result") or {}
+        with st.expander(
+            f"{rank}위 · {row.get('name') or row.get('symbol')} · {result.get('stance') or '관망'} · {result.get('direction') or '혼조·중립'}"
+        ):
+            st.write(result.get("summary") or "요약이 없습니다.")
+            score_cols = st.columns(3)
+            score_cols[0].metric("오늘 이슈·섹터", f"{float(result.get('issue_score') or 0):+.2f}", delta_color="off")
+            score_cols[1].metric("가격·기술", f"{float(result.get('technical_score') or 0):+.2f}", delta_color="off")
+            score_cols[2].metric("종목 뉴스", f"{float(result.get('news_score') or 0):+.2f}", delta_color="off")
+            positives = [*(result.get("issue_reasons") or []), *(result.get("technical_positive") or []), *(result.get("news_positive") or [])]
+            cautions = [*(result.get("issue_cautions") or []), *(result.get("technical_caution") or []), *(result.get("news_caution") or [])]
+            if positives:
+                st.markdown("**우호 근거**")
+                for line in positives[:6]:
+                    st.write(f"• {line}")
+            if cautions:
+                st.markdown("**경계요인**")
+                for line in cautions[:6]:
+                    st.write(f"• {line}")
+            if row.get("held"):
+                st.caption("이 종목은 현재 보유 정보가 있어 신규 매수 후보와 구분해 표시합니다. 추가매수 여부는 보유 비중·평단·손실 허용범위를 별도로 확인하세요.")
+
+    st.caption(
+        f"후보 분석 생성 {saved.get('created') or '시각 미제공'} · 시장자료 {display_time(saved.get('market_fetched_at'))}. "
+        "후보 순위는 현재 데이터가 바뀌면 달라질 수 있으며 확정적인 투자 권유가 아닙니다."
+    )
+
 def render_stock_news_dashboard(active_symbols):
     st.markdown('<div class="eyebrow">NEWS</div>', unsafe_allow_html=True)
     st.title("종목 뉴스")
@@ -1812,6 +2102,7 @@ DASHBOARDS = [
     "📊 관심종목 시세",
     "💼 보유·수익률",
     "📈 가격 차트",
+    "🎯 매수 추천 후보",
 ]
 
 with st.sidebar:
@@ -1955,7 +2246,7 @@ if st.session_state.get("portfolio_load_error"):
     st.warning(st.session_state.portfolio_load_error)
 
 active_symbols = list(dict.fromkeys([*symbols, *st.session_state.positions]))
-if not active_symbols and dashboard != "🏠 오늘의 이슈":
+if not active_symbols and dashboard not in {"🏠 오늘의 이슈", "🎯 매수 추천 후보"}:
     st.info("왼쪽에서 관심종목을 하나 이상 선택해 주세요. 오늘의 이슈 화면은 종목 없이도 볼 수 있습니다.")
     st.stop()
 
@@ -1972,6 +2263,8 @@ elif dashboard == "💼 보유·수익률":
     render_portfolio_dashboard(active_symbols)
 elif dashboard == "📈 가격 차트":
     render_price_dashboard(active_symbols)
+elif dashboard == "🎯 매수 추천 후보":
+    render_buy_candidates_dashboard(active_symbols)
 
 st.divider()
 st.caption("개인 학습·연구용 · 매매 검토 표시는 참고 자료입니다. 가격·뉴스는 누락·지연될 수 있으며, AI 해석은 판단 근거와 원문을 함께 확인해 주세요.")
