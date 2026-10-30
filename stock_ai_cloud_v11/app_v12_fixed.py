@@ -469,7 +469,7 @@ def news_cached(symbol, name):
 
 @st.cache_data(ttl=900, show_spinner=False, max_entries=4)
 def market_brief_cached():
-    return mb.fetch_market_brief(count=18)
+    return mb.fetch_market_brief(count=100)
 
 
 @st.cache_data(ttl=300, show_spinner=False, max_entries=32)
@@ -627,6 +627,31 @@ def _source_index(snapshot):
     return sources
 
 
+def render_sector_impact_cards(impacts, title="토픽별 수혜 가능 섹터"):
+    impacts = impacts or []
+    if not impacts:
+        return
+    st.markdown(f"### 🧩 {title}")
+    st.caption("헤드라인 토픽의 방향을 시나리오로 분류한 섹터 후보입니다. 실제 매수 추천이나 수익 보장이 아닙니다.")
+    for start in range(0, min(len(impacts), 8), 2):
+        cols = st.columns(2)
+        for col, item in zip(cols, impacts[start:start + 2]):
+            with col.container(border=True):
+                st.caption(f"{item.get('region') or ''} · {item.get('topic') or '시장 토픽'} · 언급 {int(item.get('topic_count') or 0)}건")
+                st.markdown(f"**{item.get('signal') or '방향 불명확'}** · 확신도 {item.get('confidence') or '낮음'}")
+                beneficiaries = item.get('beneficiary_sectors') or []
+                risks = item.get('risk_sectors') or []
+                if beneficiaries:
+                    st.success("수혜 가능 섹터 후보 · " + " · ".join(beneficiaries[:4]))
+                else:
+                    st.info("수혜 방향을 특정할 만큼 헤드라인 방향성이 모이지 않았습니다.")
+                if risks:
+                    st.warning("부담 가능 섹터 · " + " · ".join(risks[:3]))
+                st.caption(item.get('rationale') or '')
+                if item.get('basis'):
+                    st.caption("판단 근거 · " + item['basis'])
+
+
 def render_dashboard_brief(result, snapshot, created, model):
     engine_label = "분석 엔진" if CLOUD_MODE else "로컬 모델"
     st.caption(f"생성 {created} · {engine_label} {model} · 자동 주문 아님 · 새 데이터가 들어오면 다시 생성해 주세요.")
@@ -673,6 +698,8 @@ def render_dashboard_brief(result, snapshot, created, model):
                 st.markdown(f"**{item.get('keyword') or '키워드'}**")
                 st.caption(item.get("why") or "추가 설명이 없습니다.")
 
+    render_sector_impact_cards(result.get("sector_impacts") or [], "핵심 토픽별 수혜·부담 섹터")
+
     cross = result.get("cross_market_impact") or {}
     if cross:
         with st.container(border=True):
@@ -715,7 +742,10 @@ def render_dashboard_brief(result, snapshot, created, model):
 def render_issue_bucket(title, icon, bucket, chart_key):
     st.markdown(f"### {icon} {title}")
     keywords = (bucket or {}).get("keywords") or []
+    topics = (bucket or {}).get("topics") or []
     items = (bucket or {}).get("items") or []
+    sample_size = int((bucket or {}).get("sample_size") or len(items))
+    st.caption(f"중복 제거 후 분석 표본 · {sample_size}건")
     if keywords:
         keyword_text = "  ·  ".join(f"**{item['keyword']}** {item['count']}건" for item in keywords[:5])
         st.markdown(keyword_text)
@@ -738,10 +768,18 @@ def render_issue_bucket(title, icon, bucket, chart_key):
         st.caption("상위 키워드의 언급량 비중입니다. 한 기사에 여러 키워드가 동시에 포함될 수 있습니다.")
     else:
         st.info(f"현재 조건에서 {title} 키워드를 만들 만큼 헤드라인을 가져오지 못했습니다.")
-    with st.expander(f"{title} 헤드라인 보기"):
-        for item in items[:8]:
+
+    if topics:
+        st.markdown("**핵심 토픽**")
+        for item in topics[:5]:
+            st.write(f"• {item.get('topic') or '토픽'} · {int(item.get('count') or 0)}건 · 표본의 {float(item.get('coverage_pct') or 0):.1f}%")
+
+    with st.expander(f"{title} 헤드라인 보기 · 최근 20건"):
+        for item in items[:20]:
             st.link_button(f"[{item['id']}] {item['title']}", item["url"])
             st.caption(f"{item.get('publisher') or '매체 미제공'} · {display_time(item.get('published_at'))} · {item.get('topic') or ''}")
+        if len(items) > 20:
+            st.caption(f"전체 분석 표본 {len(items)}건 중 최근 20건만 화면에 표시합니다. 나머지 기사도 키워드·토픽 집계에는 포함됩니다.")
         if not items:
             st.caption("표시할 헤드라인이 없습니다.")
 
@@ -844,7 +882,7 @@ def render_today_issue_dashboard(active_symbols):
     st.title("오늘의 이슈")
     st.markdown('<div class="intro">국내와 해외 경제·증시 이슈를 따로 보고, 마지막에는 서로 어떤 영향을 주고받을 수 있는지 확인합니다.</div>', unsafe_allow_html=True)
     issue_header = st.columns([4, 1])
-    issue_header[0].caption("최근 약 24시간의 공개 경제·증시 헤드라인을 국내와 해외 검색 묶음으로 나누어 분석합니다.")
+    issue_header[0].caption("최근 약 24시간의 공개 경제·증시 헤드라인을 국내·해외로 나눠 중복 제거 후 약 100건 규모로 분석합니다.")
     if issue_header[1].button("오늘 이슈 새로고침", width="stretch", key="issue_refresh"):
         market_brief_cached.clear()
         st.rerun()
@@ -882,6 +920,7 @@ def render_today_issue_dashboard(active_symbols):
                 st.markdown("**주요 연결 경로**")
                 for item in channels[:5]:
                     st.write(f"• {item.get('direction') or '상호'} · {item.get('channel') or '시장 연결'} — {item.get('impact') or ''}")
+        render_sector_impact_cards(current_brief["result"].get("sector_impacts") or [], "오늘 토픽에서 보는 수혜·부담 섹터")
     elif current_brief and brief_issue_stamp != current_issue_stamp:
         st.info("오늘 이슈 자료가 새로 갱신되었습니다. 위 버튼으로 AI 분석을 다시 만들면 최신 자료 기준으로 갱신됩니다.")
     else:
