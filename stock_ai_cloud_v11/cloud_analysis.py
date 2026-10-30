@@ -331,10 +331,19 @@ def _stock_review(row: dict) -> dict:
     if not counter:
         counter = ["헤드라인과 가격의 동시 움직임만으로 원인을 확정할 수 없습니다."]
 
+    if score >= 1.25:
+        direction = "상승 우세"
+    elif score <= -1.25:
+        direction = "하락 우세"
+    else:
+        direction = "혼조·중립"
+
     return {
         "symbol": symbol,
         "stance": stance,
+        "direction": direction,
         "confidence": confidence,
+        "score": round(score, 2),
         "summary": f"현재 자료를 합산한 참고 점수는 {score:+.2f}이며, {stance} 방향으로 추가 확인할 항목이 있습니다.",
         "reasons": reasons[:4],
         "counterpoints": counter[:3],

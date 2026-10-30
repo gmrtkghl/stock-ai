@@ -1473,18 +1473,104 @@ def _render_research_extra_ai(selection, snapshot):
             st.markdown(saved["text"])
 
 
-def render_sector_dashboard(active_symbols):
-    st.markdown('<div class="eyebrow">STOCK RESEARCH</div>', unsafe_allow_html=True)
-    st.title("종목 종합분석")
+
+def _render_all_symbol_review(active_symbols, selected_symbol):
+    st.subheader("관심·보유 종목 전체 매매 검토")
+    st.caption(
+        "현재 관심종목과 보유종목을 같은 기준으로 비교합니다. 선택 종목의 상세 분석은 아래에서 이어집니다."
+    )
+
+    if CLOUD_MODE:
+        if st.button("전체 종목 AI 비교 갱신", type="primary", width="stretch", key="research_all_refresh"):
+            with st.spinner("관심·보유 종목의 가격·기술지표·뉴스를 같은 기준으로 비교하고 있습니다…"):
+                snapshot = build_dashboard_snapshot(tuple(active_symbols))
+                result, warning = cai.generate_dashboard_brief(snapshot)
+            if warning:
+                st.info(warning)
+            if result:
+                st.session_state.dashboard_brief = {
+                    "result": result,
+                    "snapshot": snapshot,
+                    "model": "API 없는 클라우드 자동 분석",
+                    "created": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"),
+                }
+                st.rerun()
+    else:
+        render_market_ai_controls(active_symbols, "research_all")
+
+    brief = st.session_state.get("dashboard_brief") or {}
+    result = brief.get("result") or {}
+    recommendations = result.get("recommendations") or []
+    if not recommendations:
+        st.info("아직 전체 종목 비교 결과가 없습니다. 위 버튼으로 현재 종목들을 한 번에 분석해 주세요.")
+        return
+
+    saved_symbols = [
+        row.get("symbol")
+        for row in (brief.get("snapshot") or {}).get("stocks", [])
+        if isinstance(row, dict)
+    ]
+    if set(saved_symbols) != set(active_symbols):
+        st.warning("관심·보유 종목 구성이 전체 비교 생성 이후 바뀌었습니다. 최신 종목 기준으로 다시 갱신해 주세요.")
+
+    rows = []
+    for rec in recommendations:
+        symbol = str(rec.get("symbol") or "")
+        item = KNOWN.get(symbol, {})
+        name = str(item.get("name") or symbol)
+        direction = str(rec.get("direction") or ("상승 우세" if "매수" in str(rec.get("stance")) else "하락 우세" if "매도" in str(rec.get("stance")) else "혼조·중립"))
+        score = rec.get("score")
+        rows.append({
+            "종목": name,
+            "티커": symbol,
+            "매매 검토": rec.get("stance") or "관망",
+            "방향": direction,
+            "확신도": rec.get("confidence") or "낮음",
+            "참고점수": float(score) if is_number(score) else None,
+        })
+
+    priority = {"매수 검토": 0, "보유 검토": 1, "관망": 2, "매도 검토": 3}
+    rows.sort(key=lambda row: (priority.get(str(row.get("매매 검토")), 9), -(row.get("참고점수") or 0)))
+    table = pd.DataFrame(rows)
+    if not table.empty:
+        st.dataframe(
+            table,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "참고점수": st.column_config.NumberColumn("참고점수", format="%+.2f"),
+            },
+        )
+
+    selected = next((rec for rec in recommendations if str(rec.get("symbol")) == str(selected_symbol)), None)
+    if selected:
+        with st.expander("현재 선택 종목의 전체 비교 근거"):
+            st.markdown(
+                f"**{label(selected_symbol)} · {selected.get('stance') or '관망'} · "
+                f"{selected.get('direction') or '혼조·중립'} · 확신도 {selected.get('confidence') or '낮음'}**"
+            )
+            for reason in selected.get("reasons") or []:
+                st.write(f"• 우호 근거 · {reason}")
+            for counter in selected.get("counterpoints") or []:
+                st.write(f"• 경계 요인 · {counter}")
+
+    st.caption(
+        f"전체 비교 생성 {brief.get('created') or '시각 미제공'} · 같은 시점의 데이터로 종목 간 상대적인 검토 방향을 비교합니다."
+    )
+
+
+def render_ai_research_dashboard(active_symbols):
+    st.markdown('<div class="eyebrow">AI STOCK RESEARCH</div>', unsafe_allow_html=True)
+    st.title("AI 종합분석")
     st.markdown(
-        '<div class="intro">오늘의 시장 이슈를 출발점으로 선택 종목의 섹터·ETF 구성, 가격 추세, 종목 뉴스, 보유 상태를 함께 분석합니다.</div>',
+        '<div class="intro">관심·보유 종목 전체의 매매 검토와 선택 종목의 이슈·섹터·가격·뉴스·보유 상태를 한 화면에서 자세히 분석합니다.</div>',
         unsafe_allow_html=True,
     )
     selection = st.selectbox("종목 선택", options=active_symbols, format_func=label, key="sector_selection")
     known, profile, kind, currency, q = selection_context(selection)
 
     header_cols = st.columns([3, 1])
-    header_cols[0].caption("오늘의 이슈 화면은 시장 전체를 간략히 보고, 이 화면에서는 선택한 한 종목을 더 깊게 분석합니다.")
+    header_cols[0].caption("오늘의 이슈는 시장 전체를 빠르게 보고, 이 화면에서는 전체 종목 비교와 선택 종목 상세 분석을 함께 확인합니다.")
     if header_cols[1].button("분석 새로고침", width="stretch", key="research_refresh"):
         history_cached.clear(); news_cached.clear(); market_brief_cached.clear(); fund_cached.clear(); quote_cached.clear()
         st.session_state.pop("research_ai_result", None)
@@ -1555,7 +1641,11 @@ def render_sector_dashboard(active_symbols):
                 + (f"평가수익률 {float(evaluated_position.get('return_pct')):+.2f}%" if is_number(evaluated_position.get("return_pct")) else "평가수익률 계산 불가")
             )
 
-    st.subheader("판단 점수 구성")
+    st.divider()
+    _render_all_symbol_review(active_symbols, selection)
+    st.divider()
+
+    st.subheader("선택 종목 판단 점수 구성")
     _render_research_score_chart(result)
     st.caption("점수는 서로 다른 성격의 자료를 비교하기 위한 내부 참고척도입니다. +는 우호적, -는 부담 요인이 상대적으로 많다는 뜻입니다.")
 
@@ -1718,11 +1808,10 @@ if "pending_symbol" in st.session_state:
 
 DASHBOARDS = [
     "🏠 오늘의 이슈",
-    "🤖 AI 매매 검토",
+    "🧠 AI 종합분석",
     "📊 관심종목 시세",
     "💼 보유·수익률",
     "📈 가격 차트",
-    "🔎 종목 종합분석",
 ]
 
 with st.sidebar:
@@ -1740,6 +1829,8 @@ with st.sidebar:
     else:
         st.caption(f"데이터: {current_profile()['name']}")
     st.markdown("## 📊 대시보드")
+    if st.session_state.get("dashboard_page") not in DASHBOARDS:
+        st.session_state.dashboard_page = "🏠 오늘의 이슈"
     dashboard = st.radio("화면 선택", DASHBOARDS, index=0, label_visibility="collapsed", key="dashboard_page")
     st.caption("처음 실행하면 ‘오늘의 이슈’가 메인 화면으로 열립니다.")
     st.divider()
@@ -1870,8 +1961,8 @@ if not active_symbols and dashboard != "🏠 오늘의 이슈":
 
 if dashboard == "🏠 오늘의 이슈":
     render_today_issue_dashboard(active_symbols)
-elif dashboard == "🤖 AI 매매 검토":
-    render_ai_summary_dashboard(active_symbols)
+elif dashboard == "🧠 AI 종합분석":
+    render_ai_research_dashboard(active_symbols)
 elif dashboard == "📊 관심종목 시세":
     @st.fragment(run_every=refresh_minutes * 60 if auto else None)
     def _auto_price_dashboard():
@@ -1881,8 +1972,6 @@ elif dashboard == "💼 보유·수익률":
     render_portfolio_dashboard(active_symbols)
 elif dashboard == "📈 가격 차트":
     render_price_dashboard(active_symbols)
-elif dashboard == "🔎 종목 종합분석":
-    render_sector_dashboard(active_symbols)
 
 st.divider()
 st.caption("개인 학습·연구용 · 매매 검토 표시는 참고 자료입니다. 가격·뉴스는 누락·지연될 수 있으며, AI 해석은 판단 근거와 원문을 함께 확인해 주세요.")
