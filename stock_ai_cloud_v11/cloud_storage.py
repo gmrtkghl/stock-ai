@@ -2,6 +2,11 @@
 
 The durable copy lives in the browser's localStorage. Streamlit Community Cloud's
 server filesystem is intentionally not used for portfolio persistence.
+
+This version deliberately uses LocalStorage.getAll() instead of getItem() because
+published streamlit-local-storage releases/examples have had different getItem
+signatures. It also retries after a prior browser-storage failure instead of
+caching the failed state forever in st.session_state.
 """
 from __future__ import annotations
 
@@ -14,7 +19,7 @@ import streamlit as st
 
 try:
     from streamlit_local_storage import LocalStorage
-except Exception:  # dependency is installed by Community Cloud from requirements.txt
+except Exception:
     LocalStorage = None
 
 STORAGE_KEY = "stock_ai_cloud_v11_state"
@@ -59,9 +64,23 @@ def _manager():
     return st.session_state._stock_ai_local_storage_manager
 
 
+def _clear_failed_cache() -> None:
+    """Allow a later rerun/deploy to recover from an earlier component failure."""
+    if st.session_state.get("_stock_ai_cloud_storage_warning"):
+        st.session_state.pop("_stock_ai_cloud_state", None)
+        st.session_state.pop("_stock_ai_cloud_storage_warning", None)
+        st.session_state.pop("_stock_ai_local_storage_manager", None)
+
+
 def load_state() -> tuple[dict, str | None]:
-    if "_stock_ai_cloud_state" in st.session_state:
-        return _parse(st.session_state._stock_ai_cloud_state), st.session_state.get("_stock_ai_cloud_storage_warning")
+    # A successful cached state is fine to reuse. A failed state is not: retry it.
+    cached = st.session_state.get("_stock_ai_cloud_state")
+    previous_warning = st.session_state.get("_stock_ai_cloud_storage_warning")
+    if cached is not None and not previous_warning:
+        return _parse(cached), None
+
+    if previous_warning:
+        _clear_failed_cache()
 
     manager = _manager()
     if manager is None:
@@ -72,20 +91,26 @@ def load_state() -> tuple[dict, str | None]:
         return state, warning
 
     try:
-        # streamlit-local-storage 0.0.25의 getItem()은 itemKey 하나만 받습니다.
-        # 예전 예제에 보이던 key= 인자를 전달하면 TypeError가 발생합니다.
-        raw = manager.getItem(STORAGE_KEY)
-        if raw is None:
-            # 최초 접속이거나 저장값이 아직 없는 경우 기본값으로 시작합니다.
-            # 오류가 아니므로 경고를 만들지 않습니다.
+        # getAll() has been stable across streamlit-local-storage releases and
+        # avoids getItem() signature differences between published examples/code.
+        stored = manager.getAll()
+        if stored is None:
             return _default(), None
+        if not isinstance(stored, dict):
+            raise TypeError("LocalStorage.getAll() returned a non-dict value")
 
-        state = _parse(raw)
+        raw = stored.get(STORAGE_KEY)
+        if raw is None:
+            state = _default()
+        else:
+            state = _parse(raw)
+
         st.session_state._stock_ai_cloud_state = state
         st.session_state.pop("_stock_ai_cloud_storage_warning", None)
         return state, None
     except Exception as exc:
         state = _default()
+        # Do not persist this as an unrecoverable cache. A later rerun may recover.
         st.session_state._stock_ai_cloud_state = state
         warning = f"브라우저 저장소를 읽지 못해 현재 세션 데이터로 시작했습니다. ({type(exc).__name__})"
         st.session_state._stock_ai_cloud_storage_warning = warning
@@ -99,13 +124,11 @@ def save_state(state: dict) -> str | None:
     if manager is None:
         return "브라우저 저장 구성요소가 없어 현재 세션에서만 저장되었습니다."
     try:
-        manager.setItem(
-            STORAGE_KEY,
-            json.dumps(state, ensure_ascii=False, separators=(",", ":")),
-            key="_stock_ai_cloud_save_component",
-        )
-        # 브라우저 컴포넌트가 localStorage에 기록할 시간을 조금 준 뒤 rerun됩니다.
-        time.sleep(0.5)
+        payload = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+        # Use only the two required arguments for maximum package-version compatibility.
+        manager.setItem(STORAGE_KEY, payload)
+        # The component writes in the browser asynchronously; give it a moment before rerun.
+        time.sleep(0.8)
         st.session_state.pop("_stock_ai_cloud_storage_warning", None)
         return None
     except Exception as exc:
