@@ -24,7 +24,11 @@ _SYMBOL_RE = re.compile(r"[A-Z0-9^][A-Z0-9.^=\-]{0,23}\Z")
 
 
 def _default() -> dict:
-    return {"schema_version": SCHEMA_VERSION, "watchlist": {"symbols": DEFAULT_SYMBOLS.copy(), "meta": {}}, "positions": {}}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "watchlist": {"symbols": DEFAULT_SYMBOLS.copy(), "meta": {}},
+        "positions": {},
+    }
 
 
 def _parse(raw: Any) -> dict:
@@ -40,7 +44,11 @@ def _parse(raw: Any) -> dict:
     symbols = [x for x in symbols if isinstance(x, str) and _SYMBOL_RE.fullmatch(x)][:12] or DEFAULT_SYMBOLS.copy()
     meta = watch.get("meta") if isinstance(watch.get("meta"), dict) else {}
     positions = raw.get("positions") if isinstance(raw.get("positions"), dict) else {}
-    return {"schema_version": SCHEMA_VERSION, "watchlist": {"symbols": list(dict.fromkeys(symbols)), "meta": meta}, "positions": positions}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "watchlist": {"symbols": list(dict.fromkeys(symbols)), "meta": meta},
+        "positions": positions,
+    }
 
 
 def _manager():
@@ -54,6 +62,7 @@ def _manager():
 def load_state() -> tuple[dict, str | None]:
     if "_stock_ai_cloud_state" in st.session_state:
         return _parse(st.session_state._stock_ai_cloud_state), st.session_state.get("_stock_ai_cloud_storage_warning")
+
     manager = _manager()
     if manager is None:
         state = _default()
@@ -61,17 +70,19 @@ def load_state() -> tuple[dict, str | None]:
         warning = "브라우저 저장 구성요소를 불러오지 못해 현재 세션에서만 데이터가 유지됩니다."
         st.session_state._stock_ai_cloud_storage_warning = warning
         return state, warning
+
     try:
-        raw = manager.getItem(STORAGE_KEY, key="_stock_ai_cloud_load_component")
+        # streamlit-local-storage 0.0.25의 getItem()은 itemKey 하나만 받습니다.
+        # 예전 예제에 보이던 key= 인자를 전달하면 TypeError가 발생합니다.
+        raw = manager.getItem(STORAGE_KEY)
         if raw is None:
-            raw = st.session_state.get("_stock_ai_cloud_load_component")
-        if raw is None:
-            # The browser component may need one render cycle before returning.
-            # Do not cache an empty default here, so a component-triggered rerun can
-            # still load an existing iPhone value.
+            # 최초 접속이거나 저장값이 아직 없는 경우 기본값으로 시작합니다.
+            # 오류가 아니므로 경고를 만들지 않습니다.
             return _default(), None
+
         state = _parse(raw)
         st.session_state._stock_ai_cloud_state = state
+        st.session_state.pop("_stock_ai_cloud_storage_warning", None)
         return state, None
     except Exception as exc:
         state = _default()
@@ -88,10 +99,14 @@ def save_state(state: dict) -> str | None:
     if manager is None:
         return "브라우저 저장 구성요소가 없어 현재 세션에서만 저장되었습니다."
     try:
-        manager.setItem(STORAGE_KEY, json.dumps(state, ensure_ascii=False, separators=(",", ":")))
-        # streamlit-local-storage is a browser component; give the frontend a brief
-        # opportunity to commit before callers immediately st.rerun().
-        time.sleep(0.35)
+        manager.setItem(
+            STORAGE_KEY,
+            json.dumps(state, ensure_ascii=False, separators=(",", ":")),
+            key="_stock_ai_cloud_save_component",
+        )
+        # 브라우저 컴포넌트가 localStorage에 기록할 시간을 조금 준 뒤 rerun됩니다.
+        time.sleep(0.5)
+        st.session_state.pop("_stock_ai_cloud_storage_warning", None)
         return None
     except Exception as exc:
         return f"iPhone 브라우저 저장소에 저장하지 못했습니다. ({type(exc).__name__})"
