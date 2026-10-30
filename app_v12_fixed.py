@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import html
 import json
 import math
 import os
@@ -148,6 +149,60 @@ h1,h2,h3 {letter-spacing:-.035em;}
 .st-key-issue_refresh button:active {
   color:#FFFFFF !important;
 }
+
+/* 오늘 토픽 수혜·부담 섹터 카드: 모바일에서도 높은 대비 유지 */
+.sector-impact-badges {
+  display:flex;
+  flex-wrap:wrap;
+  gap:.45rem;
+  margin:.25rem 0 .7rem 0;
+}
+.sector-impact-badge {
+  display:inline-block;
+  border-radius:999px;
+  padding:.34rem .68rem;
+  font-size:.9rem;
+  font-weight:800;
+  line-height:1.25;
+  letter-spacing:-.01em;
+}
+.sector-impact-badge.signal {
+  background:#173F38 !important;
+  color:#FFFFFF !important;
+  border:1px solid #173F38 !important;
+}
+.sector-impact-badge.confidence {
+  background:#EDF2F0 !important;
+  color:#203A35 !important;
+  border:1px solid #A7B8B2 !important;
+}
+.sector-impact-box {
+  border-radius:12px;
+  padding:.72rem .82rem;
+  margin:.42rem 0;
+  font-size:.95rem;
+  font-weight:750;
+  line-height:1.45;
+}
+.sector-impact-box.benefit {
+  background:#DFF3E7 !important;
+  color:#123D2D !important;
+  border:1px solid #78B58F !important;
+}
+.sector-impact-box.risk {
+  background:#FFF0DC !important;
+  color:#5A3210 !important;
+  border:1px solid #D9A15E !important;
+}
+.sector-impact-box.neutral {
+  background:#EDF1F2 !important;
+  color:#26373B !important;
+  border:1px solid #AAB6B9 !important;
+}
+.sector-impact-box strong {
+  color:inherit !important;
+  font-weight:850 !important;
+}
 @media (max-width: 768px) {
   html, body {margin:0 !important; padding:0 !important; max-width:100vw !important; overflow-x:hidden !important;}
   .stApp {margin:0 !important; padding:0 !important; width:100vw !important; max-width:100vw !important; overflow-x:hidden !important;}
@@ -225,6 +280,8 @@ h1,h2,h3 {letter-spacing:-.035em;}
   .stButton button, .stLinkButton a {min-height:2.8rem; width:100%;}
   [data-testid="stDataFrame"] {max-width:100%; overflow-x:auto;}
   [data-testid="stPlotlyChart"] {width:100% !important; max-width:100% !important; overflow:hidden !important;}
+  .sector-impact-badge {font-size:.95rem !important; padding:.4rem .72rem !important;}
+  .sector-impact-box {font-size:1rem !important; line-height:1.5 !important; padding:.78rem .86rem !important;}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -638,15 +695,37 @@ def render_sector_impact_cards(impacts, title="토픽별 수혜 가능 섹터"):
         for col, item in zip(cols, impacts[start:start + 2]):
             with col.container(border=True):
                 st.caption(f"{item.get('region') or ''} · {item.get('topic') or '시장 토픽'} · 언급 {int(item.get('topic_count') or 0)}건")
-                st.markdown(f"**{item.get('signal') or '방향 불명확'}** · 확신도 {item.get('confidence') or '낮음'}")
+
+                signal = html.escape(str(item.get('signal') or '방향 불명확'))
+                confidence = html.escape(str(item.get('confidence') or '낮음'))
+                st.markdown(
+                    f'<div class="sector-impact-badges">'
+                    f'<span class="sector-impact-badge signal">방향 · {signal}</span>'
+                    f'<span class="sector-impact-badge confidence">확신도 · {confidence}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
                 beneficiaries = item.get('beneficiary_sectors') or []
                 risks = item.get('risk_sectors') or []
                 if beneficiaries:
-                    st.success("수혜 가능 섹터 후보 · " + " · ".join(beneficiaries[:4]))
+                    benefit_text = " · ".join(html.escape(str(x)) for x in beneficiaries[:4])
+                    st.markdown(
+                        f'<div class="sector-impact-box benefit"><strong>수혜 가능 섹터 후보</strong><br>{benefit_text}</div>',
+                        unsafe_allow_html=True,
+                    )
                 else:
-                    st.info("수혜 방향을 특정할 만큼 헤드라인 방향성이 모이지 않았습니다.")
+                    st.markdown(
+                        '<div class="sector-impact-box neutral"><strong>수혜 방향 불명확</strong><br>'
+                        '헤드라인 방향성이 충분히 모이지 않았습니다.</div>',
+                        unsafe_allow_html=True,
+                    )
                 if risks:
-                    st.warning("부담 가능 섹터 · " + " · ".join(risks[:3]))
+                    risk_text = " · ".join(html.escape(str(x)) for x in risks[:3])
+                    st.markdown(
+                        f'<div class="sector-impact-box risk"><strong>부담 가능 섹터</strong><br>{risk_text}</div>',
+                        unsafe_allow_html=True,
+                    )
                 st.caption(item.get('rationale') or '')
                 if item.get('basis'):
                     st.caption("판단 근거 · " + item['basis'])
