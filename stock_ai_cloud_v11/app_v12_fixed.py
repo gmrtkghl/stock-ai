@@ -203,6 +203,27 @@ h1,h2,h3 {letter-spacing:-.035em;}
   color:inherit !important;
   font-weight:850 !important;
 }
+.sector-impact-box,
+.sector-impact-box li {
+  word-break:keep-all !important;
+  overflow-wrap:break-word !important;
+}
+.sector-impact-box ul {
+  margin:.42rem 0 0 1.15rem !important;
+  padding:0 !important;
+}
+.sector-impact-box li {
+  margin:.28rem 0 !important;
+  line-height:1.5 !important;
+  font-weight:700 !important;
+}
+.sector-impact-help {
+  margin:.2rem 0 .65rem 0;
+  color:#536A63;
+  font-size:.86rem;
+  line-height:1.5;
+  word-break:keep-all;
+}
 @media (max-width: 768px) {
   html, body {margin:0 !important; padding:0 !important; max-width:100vw !important; overflow-x:hidden !important;}
   .stApp {margin:0 !important; padding:0 !important; width:100vw !important; max-width:100vw !important; overflow-x:hidden !important;}
@@ -684,12 +705,46 @@ def _source_index(snapshot):
     return sources
 
 
-def render_sector_impact_cards(impacts, title="토픽별 수혜 가능 섹터"):
+def _friendly_sector_label(value):
+    text = str(value or "").strip()
+    aliases = {
+        "은행 예대마진 민감주": "은행주 (대출금리와 예금금리 차이에 민감)",
+        "실적 기대가 과도하게 선반영된 업종": "실적 기대가 이미 주가에 많이 반영된 업종",
+        "실적 개선이 집중된 해당 업종": "실적이 실제로 좋아진 기업이 많은 업종",
+        "실적 하향이 집중된 해당 업종": "실적 전망이 나빠진 기업이 많은 업종",
+        "고베타 성장주": "시장 등락에 크게 움직이는 성장주",
+        "인플레이션 헤지 성격 자산": "물가 상승 때 상대적으로 강한 자산·업종",
+        "가격전가력이 높은 방어주": "원가 상승을 판매가격에 반영하기 쉬운 방어주",
+        "원화 환산 효과가 큰 수출주": "환율 변화가 원화 실적에 크게 반영되는 수출주",
+        "중국 경기 방어형 포지션": "중국 경기 영향이 비교적 작은 방어 업종",
+        "일부 방어주 상대수익률": "필수소비재·통신 등 일부 방어 업종의 상대 강도",
+        "무역갈등 수혜 대체재 일부": "관세·무역갈등 때 대체 수요를 받을 수 있는 일부 업종",
+        "방산·에너지 위험프리미엄": "방산·에너지 업종의 지정학적 위험 프리미엄",
+    }
+    return aliases.get(text, text)
+
+
+def _sector_list_html(values):
+    rows = []
+    for value in values:
+        label = _friendly_sector_label(value)
+        if label:
+            rows.append(f"<li>{html.escape(label)}</li>")
+    return "<ul>" + "".join(rows) + "</ul>" if rows else ""
+
+
+def render_sector_impact_cards(impacts, title="오늘 토픽이 업종에 줄 수 있는 영향"):
     impacts = impacts or []
     if not impacts:
         return
     st.markdown(f"### 🧩 {title}")
-    st.caption("헤드라인 토픽의 방향을 시나리오로 분류한 섹터 후보입니다. 실제 매수 추천이나 수익 보장이 아닙니다.")
+    st.markdown(
+        '<div class="sector-impact-help">'
+        '<strong>호재 가능 업종</strong>은 현재 뉴스 방향이 이어질 때 상대적으로 유리할 수 있는 업종, '
+        '<strong>불리할 수 있는 업종</strong>은 비용·수요·금리 등의 영향으로 상대적으로 부담을 받을 수 있는 업종을 뜻합니다. '
+        '확정적인 주가 예측이나 매수·매도 추천은 아닙니다.</div>',
+        unsafe_allow_html=True,
+    )
     for start in range(0, min(len(impacts), 8), 2):
         cols = st.columns(2)
         for col, item in zip(cols, impacts[start:start + 2]):
@@ -700,8 +755,8 @@ def render_sector_impact_cards(impacts, title="토픽별 수혜 가능 섹터"):
                 confidence = html.escape(str(item.get('confidence') or '낮음'))
                 st.markdown(
                     f'<div class="sector-impact-badges">'
-                    f'<span class="sector-impact-badge signal">방향 · {signal}</span>'
-                    f'<span class="sector-impact-badge confidence">확신도 · {confidence}</span>'
+                    f'<span class="sector-impact-badge signal">뉴스 방향 · {signal}</span>'
+                    f'<span class="sector-impact-badge confidence">판단 확신도 · {confidence}</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -709,26 +764,27 @@ def render_sector_impact_cards(impacts, title="토픽별 수혜 가능 섹터"):
                 beneficiaries = item.get('beneficiary_sectors') or []
                 risks = item.get('risk_sectors') or []
                 if beneficiaries:
-                    benefit_text = " · ".join(html.escape(str(x)) for x in beneficiaries[:4])
                     st.markdown(
-                        f'<div class="sector-impact-box benefit"><strong>수혜 가능 섹터 후보</strong><br>{benefit_text}</div>',
+                        '<div class="sector-impact-box benefit"><strong>✅ 호재가 될 수 있는 업종</strong>'
+                        + _sector_list_html(beneficiaries[:4]) + '</div>',
                         unsafe_allow_html=True,
                     )
                 else:
                     st.markdown(
-                        '<div class="sector-impact-box neutral"><strong>수혜 방향 불명확</strong><br>'
-                        '헤드라인 방향성이 충분히 모이지 않았습니다.</div>',
+                        '<div class="sector-impact-box neutral"><strong>➖ 호재 업종을 특정하기 어려움</strong><br>'
+                        '뉴스의 방향이 서로 섞여 있거나 근거가 충분하지 않습니다.</div>',
                         unsafe_allow_html=True,
                     )
                 if risks:
-                    risk_text = " · ".join(html.escape(str(x)) for x in risks[:3])
                     st.markdown(
-                        f'<div class="sector-impact-box risk"><strong>부담 가능 섹터</strong><br>{risk_text}</div>',
+                        '<div class="sector-impact-box risk"><strong>⚠️ 불리할 수 있는 업종</strong>'
+                        + _sector_list_html(risks[:3]) + '</div>',
                         unsafe_allow_html=True,
                     )
-                st.caption(item.get('rationale') or '')
+                if item.get('rationale'):
+                    st.caption("왜 그렇게 보나 · " + str(item['rationale']))
                 if item.get('basis'):
-                    st.caption("판단 근거 · " + item['basis'])
+                    st.caption("뉴스 근거 · " + str(item['basis']))
 
 
 def render_dashboard_brief(result, snapshot, created, model):
@@ -777,7 +833,7 @@ def render_dashboard_brief(result, snapshot, created, model):
                 st.markdown(f"**{item.get('keyword') or '키워드'}**")
                 st.caption(item.get("why") or "추가 설명이 없습니다.")
 
-    render_sector_impact_cards(result.get("sector_impacts") or [], "핵심 토픽별 수혜·부담 섹터")
+    render_sector_impact_cards(result.get("sector_impacts") or [], "핵심 토픽이 업종에 줄 수 있는 영향")
 
     cross = result.get("cross_market_impact") or {}
     if cross:
@@ -999,7 +1055,7 @@ def render_today_issue_dashboard(active_symbols):
                 st.markdown("**주요 연결 경로**")
                 for item in channels[:5]:
                     st.write(f"• {item.get('direction') or '상호'} · {item.get('channel') or '시장 연결'} — {item.get('impact') or ''}")
-        render_sector_impact_cards(current_brief["result"].get("sector_impacts") or [], "오늘 토픽에서 보는 수혜·부담 섹터")
+        render_sector_impact_cards(current_brief["result"].get("sector_impacts") or [], "오늘 토픽이 업종에 줄 수 있는 영향")
     elif current_brief and brief_issue_stamp != current_issue_stamp:
         st.info("오늘 이슈 자료가 새로 갱신되었습니다. 위 버튼으로 AI 분석을 다시 만들면 최신 자료 기준으로 갱신됩니다.")
     else:
