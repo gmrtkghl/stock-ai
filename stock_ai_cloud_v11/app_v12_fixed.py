@@ -372,7 +372,7 @@ _PROFILE_STATE_KEYS = {
     "watch_symbols", "watch_meta", "positions", "portfolio_load_error", "available_symbols",
     "pending_symbol", "position_notice", "instrument_search", "selected_search_symbol",
     "portfolio_selection", "price_selection", "sector_selection", "stock_news_selection",
-    "stock_ai_selection", "ai_result", "dashboard_ai_result", "market_impact_result",
+    "stock_ai_selection", "ai_result", "dashboard_ai_result", "market_impact_result", "sector_issue_review",
 }
 
 
@@ -1172,12 +1172,118 @@ def render_price_dashboard(active_symbols):
     st.caption("출처: Yahoo Finance. 당일 일봉은 장중·지연 값일 수 있으며 지표만으로 미래 가격을 확정할 수 없습니다.")
 
 
+
+
+def render_issue_instrument_review(selection, known, profile, kind, q, fund=None):
+    st.divider()
+    st.subheader("오늘 이슈 기반 종목 영향 분석")
+    st.caption(
+        "오늘 수집한 약 100건 규모의 증시·경제 헤드라인에서 나온 토픽을 선택 종목의 섹터/산업 또는 ETF 섹터 비중과 연결하고, "
+        "최근 가격·기술지표를 함께 봅니다. 상승·하락 압력은 예측이 아니라 현재 자료의 방향성 요약입니다."
+    )
+
+    if st.button("이 종목을 오늘 이슈로 분석", type="primary", width="stretch", key=f"sector_issue_review_{selection}"):
+        with st.spinner("오늘 이슈와 선택 종목의 섹터·가격 흐름을 연결하고 있습니다…"):
+            history, history_error = history_cached(selection)
+            summary = None
+            if history is not None and not history.empty:
+                summary = md.summary_from_history(history)
+            market = market_brief_cached()
+            position = st.session_state.positions.get(selection)
+            snapshot = {
+                "symbol": selection,
+                "name": known.get("name") or profile.get("name") or selection,
+                "kind": kind,
+                "sector": profile.get("sector"),
+                "industry": profile.get("industry"),
+                "quote": q,
+                "analysis": summary,
+                "position": pf.evaluate_position(position, q) if position else None,
+                "fund_sectors": (fund or {}).get("sectors") or {},
+            }
+            result, warning = cai.generate_issue_stock_review(snapshot, market)
+        if warning:
+            st.info(warning)
+        if history_error:
+            st.info("가격 이력 일부를 가져오지 못해 이슈·현재 시세 중심으로 분석했습니다.")
+        if result:
+            st.session_state.sector_issue_review = {
+                "symbol": selection,
+                "result": result,
+                "created": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"),
+            }
+            st.rerun()
+
+    saved = st.session_state.get("sector_issue_review") or {}
+    if saved.get("symbol") != selection:
+        st.caption("위 버튼을 누르면 선택한 종목 기준으로 최신 이슈 분석을 만듭니다.")
+        return
+
+    result = saved.get("result") or {}
+    st.caption(f"분석 생성 {saved.get('created') or ''} · 뉴스 분석 표본 {int(result.get('sample_size') or 0)}건")
+    cols = st.columns(3)
+    with cols[0].container(border=True):
+        st.caption("이슈+가격 방향")
+        st.subheader(result.get("direction") or "혼조·중립")
+    with cols[1].container(border=True):
+        st.caption("매매 검토")
+        st.subheader(result.get("stance") or "관망")
+    with cols[2].container(border=True):
+        st.caption("판단 확신도")
+        st.subheader(result.get("confidence") or "낮음")
+
+    with st.container(border=True):
+        st.markdown("**종합 판단**")
+        st.write(result.get("summary") or "분석 요약이 없습니다.")
+        score_cols = st.columns(2)
+        score_cols[0].metric("오늘 이슈·섹터 점수", f"{float(result.get('issue_score') or 0):+.2f}", delta_color="off")
+        score_cols[1].metric("가격·기술 흐름 점수", f"{float(result.get('technical_score') or 0):+.2f}", delta_color="off")
+
+    factors = result.get("factors") or []
+    if factors:
+        st.markdown("**오늘 이슈 중 이 종목에 연결된 핵심 요인**")
+        for item in factors[:5]:
+            icon = "↗️" if float(item.get("contribution") or 0) > 0 else "↘️"
+            st.write(
+                f"{icon} {item.get('region') or '시장'} · {item.get('topic') or '토픽'} · "
+                f"{item.get('signal') or '방향 불명확'} · {item.get('effect') or ''}"
+            )
+
+    positive = (result.get("issue_reasons") or []) + (result.get("technical_positive") or [])
+    caution = (result.get("issue_cautions") or []) + (result.get("technical_caution") or [])
+    detail_cols = st.columns(2)
+    with detail_cols[0].container(border=True):
+        st.markdown("**상승·보유 쪽 근거**")
+        if positive:
+            for reason in positive[:6]:
+                st.write(f"• {reason}")
+        else:
+            st.caption("현재 자료에서 뚜렷한 긍정 근거가 충분하지 않습니다.")
+    with detail_cols[1].container(border=True):
+        st.markdown("**하락·매도 쪽 위험요인**")
+        if caution:
+            for reason in caution[:6]:
+                st.write(f"• {reason}")
+        else:
+            st.caption("현재 자료에서 별도 경계 요인이 충분히 잡히지 않았습니다.")
+
+    basis = result.get("exposure_basis") or []
+    if basis:
+        with st.expander("어떤 기준으로 종목과 이슈를 연결했나"):
+            for row in basis:
+                st.write(f"• {row}")
+    st.caption(
+        "매수 검토·보유 검토·매도 검토·관망은 자동 주문이나 투자 권유가 아니라 확인할 방향을 정리한 참고 표현입니다. "
+        "헤드라인과 주가의 동시 움직임만으로 인과관계를 확정하지 않습니다."
+    )
+
 def render_sector_dashboard(active_symbols):
     st.markdown('<div class="eyebrow">SECTOR & FUND</div>', unsafe_allow_html=True)
     st.title("섹터·ETF 구성")
-    st.markdown('<div class="intro">개별 주식의 섹터·산업과 ETF의 상위 섹터·보유종목 구성을 확인합니다.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="intro">개별 주식의 섹터·산업과 ETF의 상위 섹터·보유종목을 확인하고, 오늘 이슈가 선택 종목에 줄 수 있는 상승·하락 압력과 매매 검토 방향까지 연결합니다.</div>', unsafe_allow_html=True)
     selection = st.selectbox("종목 선택", options=active_symbols, format_func=label, key="sector_selection")
     known, profile, kind, currency, q = selection_context(selection)
+
     if kind == "stock":
         left, right = st.columns(2)
         with left.container(border=True):
@@ -1191,30 +1297,44 @@ def render_sector_dashboard(active_symbols):
         st.caption(f"Yahoo Finance의 기업 분류 · 조회 시각 {display_time(profile.get('fetched_at'))}")
         if profile.get("error"):
             st.warning(profile["error"])
+        render_issue_instrument_review(selection, known, profile, kind, q, fund=None)
         return
+
     if kind not in {"etf", "index"}:
         st.info("이 상품 유형의 섹터 구성은 현재 기본판에서 지원하지 않습니다.")
+        render_issue_instrument_review(selection, known, profile, kind, q, fund=None)
         return
+
     proxy = selection == "^GSPC"
     fund_symbol = "VOO" if proxy else selection
     if kind == "index" and not proxy:
         st.info("이 지수의 공식 구성 정보는 제공자 페이지에서 확인해 주세요. ETF 구성 정보와 자동으로 동일시하지 않습니다.")
+        render_issue_instrument_review(selection, known, profile, kind, q, fund=None)
         return
     if proxy:
-        st.info("S&P 500은 지수입니다. 아래는 S&P 500 추종 ETF VOO의 구성 참고 자료입니다.")
+        st.info("S&P 500은 지수입니다. 아래는 S&P 500 추종 ETF VOO의 구성 참고 자료이며, 이슈 분석에서도 VOO 섹터 비중을 대체 자료로 사용합니다.")
+
     with st.spinner("펀드 구성 정보를 확인하는 중입니다…"):
         fund = fund_cached(fund_symbol)
     sectors = fund.get("sectors") or {}
     st.subheader(f"{fund_symbol}의 상위 섹터")
     if sectors:
         series = pd.Series({sector_name(k): float(v) * 100 for k, v in sectors.items() if is_number(v) and float(v) >= 0}).sort_values(ascending=False).head(5)
-        figure = go.Figure(go.Bar(x=series.iloc[::-1].values, y=series.iloc[::-1].index, orientation="h",
-                                 text=[f"{v:.2f}%" for v in series.iloc[::-1]], textposition="outside"))
-        figure.update_layout(height=290, margin=dict(l=10, r=65, t=10, b=10), template="plotly_white", xaxis_title="제공된 섹터 비중(%)",
-                             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        figure = go.Figure(go.Bar(
+            x=series.iloc[::-1].values,
+            y=series.iloc[::-1].index,
+            orientation="h",
+            text=[f"{v:.2f}%" for v in series.iloc[::-1]],
+            textposition="outside",
+        ))
+        figure.update_layout(
+            height=290, margin=dict(l=10, r=65, t=10, b=10), template="plotly_white",
+            xaxis_title="제공된 섹터 비중(%)", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        )
         st.plotly_chart(figure, width="stretch")
     else:
         st.info("섹터 비중을 제공받지 못했습니다.")
+
     st.subheader("상위 보유 종목")
     holdings = fund.get("holdings")
     if isinstance(holdings, pd.DataFrame) and not holdings.empty:
@@ -1229,6 +1349,7 @@ def render_sector_dashboard(active_symbols):
     if fund.get("error"):
         st.warning(fund["error"])
 
+    render_issue_instrument_review(selection, known, profile, kind, q, fund=fund)
 
 def render_stock_news_dashboard(active_symbols):
     st.markdown('<div class="eyebrow">NEWS</div>', unsafe_allow_html=True)

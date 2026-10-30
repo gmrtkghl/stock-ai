@@ -525,6 +525,350 @@ def _cross_impact(market: dict, sector_impacts: list[dict]) -> dict:
     }
 
 
+
+# Canonical exposure groups used to connect market issue sectors with a selected
+# stock/ETF. These are deliberately broad: they estimate exposure, not causal
+# impact or expected return.
+_FUND_SECTOR_GROUPS = {
+    "technology": ("technology", "growth"),
+    "communication_services": ("communication", "growth"),
+    "consumer_cyclical": ("consumer_cyclical", "growth"),
+    "consumer_defensive": ("consumer_defensive",),
+    "financial_services": ("financials",),
+    "healthcare": ("healthcare",),
+    "industrials": ("industrials",),
+    "energy": ("energy",),
+    "utilities": ("utilities",),
+    "realestate": ("real_estate",),
+    "real_estate": ("real_estate",),
+    "basic_materials": ("materials",),
+}
+
+
+def _add_weight(weights: dict[str, float], group: str, value: float) -> None:
+    try:
+        number = max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return
+    if number > weights.get(group, 0.0):
+        weights[group] = number
+
+
+def _instrument_exposure(snapshot: dict) -> tuple[dict[str, float], list[str]]:
+    """Return broad issue-exposure weights plus human-readable basis notes."""
+    weights: dict[str, float] = {}
+    basis: list[str] = []
+    kind = str(snapshot.get("kind") or "stock").lower()
+    name = str(snapshot.get("name") or "")
+    symbol = str(snapshot.get("symbol") or "").upper()
+    sector = str(snapshot.get("sector") or "")
+    industry = str(snapshot.get("industry") or "")
+    text = " ".join([name, symbol, sector, industry]).casefold()
+
+    fund_sectors = snapshot.get("fund_sectors") or {}
+    if isinstance(fund_sectors, dict) and fund_sectors:
+        ranked = []
+        for raw_key, raw_weight in fund_sectors.items():
+            try:
+                weight = max(0.0, min(1.0, float(raw_weight)))
+            except (TypeError, ValueError):
+                continue
+            key = str(raw_key).lower().replace(" ", "_").replace("-", "_")
+            for group in _FUND_SECTOR_GROUPS.get(key, ()):
+                _add_weight(weights, group, weight)
+            ranked.append((key, weight))
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        if ranked:
+            basis.append("ETF/지수 대체 ETF의 실제 섹터 비중을 이슈 노출도에 반영했습니다.")
+
+    # Stocks and ETFs without sector weights use provider sector/industry text.
+    if "technology" in text or "software" in text or "internet" in text or "정보기술" in text:
+        _add_weight(weights, "technology", 1.0)
+        _add_weight(weights, "growth", 0.85)
+    if any(term in text for term in ("semiconductor", "반도체", "hynix", "nvidia", "005930", "000660", "nvda")):
+        _add_weight(weights, "semiconductors", 1.0)
+        _add_weight(weights, "technology", 1.0)
+        _add_weight(weights, "exports", 0.75 if symbol.endswith((".KS", ".KQ")) else 0.45)
+    if "communication" in text or "telecom" in text or "interactive media" in text:
+        _add_weight(weights, "communication", 1.0)
+        _add_weight(weights, "growth", 0.7)
+    if "financial" in text or "bank" in text or "insurance" in text or "capital markets" in text:
+        _add_weight(weights, "financials", 1.0)
+    if "real estate" in text or "reit" in text:
+        _add_weight(weights, "real_estate", 1.0)
+    if "consumer cyclical" in text or "consumer discretionary" in text:
+        _add_weight(weights, "consumer_cyclical", 1.0)
+    if "consumer defensive" in text or "consumer staples" in text:
+        _add_weight(weights, "consumer_defensive", 1.0)
+    if "energy" in text or "oil" in text or "petroleum" in text:
+        _add_weight(weights, "energy", 1.0)
+    if "industrial" in text or "machinery" in text or "aerospace" in text or "defense" in text:
+        _add_weight(weights, "industrials", 1.0)
+    if "defense" in text or "aerospace & defense" in text:
+        _add_weight(weights, "defense", 1.0)
+    if "basic materials" in text or "chemicals" in text or "steel" in text or "materials" in text:
+        _add_weight(weights, "materials", 1.0)
+    if "utilities" in text:
+        _add_weight(weights, "utilities", 1.0)
+    if "healthcare" in text or "health care" in text:
+        _add_weight(weights, "healthcare", 1.0)
+    if any(term in text for term in ("auto manufacturers", "automobile", "automotive", "자동차")):
+        _add_weight(weights, "autos", 1.0)
+        _add_weight(weights, "consumer_cyclical", 0.85)
+        if symbol.endswith((".KS", ".KQ")):
+            _add_weight(weights, "exports", 0.8)
+    if any(term in text for term in ("airline", "airlines", "transportation", "logistics", "shipping")):
+        _add_weight(weights, "transport", 1.0)
+        _add_weight(weights, "industrials", 0.65)
+
+    # Well-known benchmark/name hints only fill gaps; they do not override provider data.
+    if symbol in {"GOOG", "GOOGL"}:
+        _add_weight(weights, "communication", 1.0)
+        _add_weight(weights, "technology", 0.75)
+        _add_weight(weights, "growth", 0.9)
+    if symbol in {"QQQ"}:
+        _add_weight(weights, "growth", max(weights.get("growth", 0.0), 0.85))
+    if symbol in {"^GSPC", "VOO", "SPY"}:
+        _add_weight(weights, "broad_market", 1.0)
+
+    if sector or industry:
+        basis.append("기업의 Yahoo Finance 섹터·산업 분류를 이슈 노출도에 반영했습니다.")
+    if not weights:
+        basis.append("섹터·산업 연결 정보가 부족해 이슈 노출도는 보수적으로 계산했습니다.")
+    return weights, list(dict.fromkeys(basis))
+
+
+def _label_groups(label: str) -> set[str]:
+    text = str(label or "").casefold()
+    # Conditional labels need company-specific valuation/earnings evidence. Do not
+    # assume every growth stock or every company in the sector meets the condition.
+    if any(term in text for term in (
+        "밸류에이션 부담", "고평가 성장주", "실적 기대가 과도하게 선반영",
+        "실적 개선이 집중된 해당 업종", "실적 하향이 집중된 해당 업종",
+    )):
+        return set()
+    groups: set[str] = set()
+    if any(term in text for term in ("it", "성장주", "데이터센터")):
+        groups.update({"technology", "growth"})
+    if "반도체" in text:
+        groups.update({"semiconductors", "technology"})
+    if "전력기기" in text or "전력인프라" in text:
+        groups.update({"industrials", "utilities"})
+    if any(term in text for term in ("은행", "보험", "증권", "금융")):
+        groups.add("financials")
+    if any(term in text for term in ("리츠", "부동산")):
+        groups.add("real_estate")
+    if "경기소비재" in text:
+        groups.add("consumer_cyclical")
+    if "필수소비재" in text or "방어주" in text:
+        groups.add("consumer_defensive")
+    if "통신" in text:
+        groups.add("communication")
+    if "유틸리티" in text:
+        groups.add("utilities")
+    if any(term in text for term in ("정유", "에너지")):
+        groups.add("energy")
+    if any(term in text for term in ("항공", "운송", "물류", "여행")):
+        groups.add("transport")
+    if any(term in text for term in ("화학", "소재", "원자재")):
+        groups.add("materials")
+    if any(term in text for term in ("산업재", "조선", "기계")):
+        groups.add("industrials")
+    if "방산" in text:
+        groups.update({"defense", "industrials"})
+    if any(term in text for term in ("자동차", "자동차부품", "2차전지")):
+        groups.update({"autos", "consumer_cyclical"})
+    if "수출" in text:
+        groups.add("exports")
+    if "장기채" in text or "채권" in text:
+        groups.add("bonds")
+    return groups
+
+
+def _match_sector_labels(labels: Any, exposure: dict[str, float]) -> tuple[float, list[str]]:
+    best = 0.0
+    matched: list[str] = []
+    for label in _sector_values(labels):
+        groups = _label_groups(label)
+        if not groups:
+            continue
+        score = max((exposure.get(group, 0.0) for group in groups), default=0.0)
+        # Semiconductor-specific labels should not treat a generic tech ETF as
+        # pure semiconductor exposure; allow a reduced secondary match.
+        if "semiconductors" in groups and score == 0 and exposure.get("technology"):
+            score = exposure.get("technology", 0.0) * 0.35
+        if score > 0.12:
+            best = max(best, score)
+            matched.append(label)
+    return best, list(dict.fromkeys(matched))
+
+
+def _technical_pressure(snapshot: dict) -> tuple[float, list[str], list[str], int]:
+    quote = snapshot.get("quote") or {}
+    analysis = snapshot.get("analysis") or {}
+    score = 0.0
+    positive: list[str] = []
+    caution: list[str] = []
+    evidence = 0
+
+    change = _num(quote.get("change_pct"))
+    if change is not None:
+        evidence += 1
+        if change >= 2:
+            score += 0.9; positive.append(f"전 거래일 대비 {change:+.2f}%로 단기 가격 흐름이 강합니다.")
+        elif change >= 0.5:
+            score += 0.4; positive.append(f"전 거래일 대비 {change:+.2f}% 상승했습니다.")
+        elif change <= -2:
+            score -= 0.9; caution.append(f"전 거래일 대비 {change:+.2f}%로 단기 가격 흐름이 약합니다.")
+        elif change <= -0.5:
+            score -= 0.4; caution.append(f"전 거래일 대비 {change:+.2f}% 하락했습니다.")
+
+    r20 = _num(analysis.get("return_20d_pct"))
+    if r20 is not None:
+        evidence += 1
+        if r20 >= 7:
+            score += 0.9; positive.append(f"최근 20거래일 가격 변화율이 {r20:+.2f}%입니다.")
+        elif r20 >= 3:
+            score += 0.4; positive.append(f"최근 20거래일 가격 변화율이 {r20:+.2f}%로 양호합니다.")
+        elif r20 <= -7:
+            score -= 0.9; caution.append(f"최근 20거래일 가격 변화율이 {r20:+.2f}%입니다.")
+        elif r20 <= -3:
+            score -= 0.4; caution.append(f"최근 20거래일 가격 변화율이 {r20:+.2f}%로 약합니다.")
+
+    sma20, sma60 = _num(analysis.get("sma20")), _num(analysis.get("sma60"))
+    if sma20 is not None and sma60 is not None:
+        evidence += 1
+        if sma20 > sma60:
+            score += 0.6; positive.append("20거래일 이동평균이 60거래일 이동평균보다 높습니다.")
+        elif sma20 < sma60:
+            score -= 0.6; caution.append("20거래일 이동평균이 60거래일 이동평균보다 낮습니다.")
+
+    rsi = _num(analysis.get("rsi14"))
+    if rsi is not None:
+        evidence += 1
+        if rsi >= 72:
+            score -= 0.2; caution.append(f"RSI {rsi:.1f}로 단기 상승이 많이 누적된 구간입니다.")
+        elif rsi <= 28:
+            score += 0.1; caution.append(f"RSI {rsi:.1f}로 낙폭이 큰 구간이라 변동성이 커질 수 있습니다.")
+
+    return max(-2.5, min(2.5, score)), positive, caution, evidence
+
+
+def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | None, str | None]:
+    """Connect today's market topics to one selected stock/ETF and its price trend.
+
+    The result is a review aid, not a price forecast or trading instruction.
+    """
+    if not isinstance(snapshot, dict) or not isinstance(market, dict):
+        return None, "이슈 기반 분석 자료 형식이 올바르지 않습니다."
+
+    exposure, exposure_basis = _instrument_exposure(snapshot)
+    impacts = _sector_impacts(market, limit_per_region=6)
+    issue_score = 0.0
+    factors: list[dict] = []
+    confidence_weight = {"높음": 1.0, "중간": 0.65, "낮음": 0.35}
+
+    for impact in impacts:
+        benefit_strength, benefit_labels = _match_sector_labels(impact.get("beneficiary_sectors"), exposure)
+        risk_strength, risk_labels = _match_sector_labels(impact.get("risk_sectors"), exposure)
+        net_strength = benefit_strength - risk_strength
+        if abs(net_strength) < 0.12:
+            continue
+        conf = confidence_weight.get(str(impact.get("confidence") or "낮음"), 0.35)
+        count = int(impact.get("topic_count") or 0)
+        count_factor = min(1.15, 0.65 + min(count, 20) / 40.0)
+        contribution = net_strength * conf * count_factor * 1.35
+        issue_score += contribution
+        factors.append({
+            "region": impact.get("region"),
+            "topic": impact.get("topic"),
+            "signal": impact.get("signal"),
+            "confidence": impact.get("confidence"),
+            "topic_count": count,
+            "effect": "호재 쪽" if contribution > 0 else "부담 쪽",
+            "contribution": contribution,
+            "matched_benefits": benefit_labels[:3],
+            "matched_risks": risk_labels[:3],
+            "news_ids": list(impact.get("news_ids") or [])[:4],
+        })
+
+    issue_score = max(-3.0, min(3.0, issue_score))
+    factors.sort(key=lambda x: abs(x["contribution"]), reverse=True)
+    technical_score, technical_positive, technical_caution, technical_evidence = _technical_pressure(snapshot)
+    combined = max(-5.0, min(5.0, issue_score + technical_score))
+
+    if combined >= 1.5:
+        direction = "상승 압력 우세"
+    elif combined <= -1.5:
+        direction = "하락 압력 우세"
+    else:
+        direction = "혼조·중립"
+
+    position = snapshot.get("position") or {}
+    signal_codes = {x.get("code") for x in (position.get("signals") or []) if isinstance(x, dict)}
+    if "profit_review" in signal_codes and combined < 1.0:
+        stance = "매도 검토"
+    elif combined >= 2.1:
+        stance = "매수 검토"
+    elif combined <= -2.1:
+        stance = "매도 검토"
+    elif position:
+        stance = "보유 검토"
+    else:
+        stance = "관망"
+
+    evidence_count = len(factors) + technical_evidence
+    magnitude = abs(combined)
+    confidence = "높음" if evidence_count >= 6 and magnitude >= 2.5 else "중간" if evidence_count >= 3 and magnitude >= 1.2 else "낮음"
+
+    issue_reasons = []
+    issue_cautions = []
+    for item in factors[:5]:
+        matched = item["matched_benefits"] if item["contribution"] > 0 else item["matched_risks"]
+        label_text = ", ".join(matched) if matched else "선택 종목의 섹터 노출"
+        sentence = (
+            f"{item['region'] or '시장'} {item['topic'] or '토픽'} · {item['signal'] or '방향 불명확'} "
+            f"({item['topic_count']}건): {label_text}와 연결되어 {item['effect']}으로 반영했습니다."
+        )
+        (issue_reasons if item["contribution"] > 0 else issue_cautions).append(sentence)
+
+    if not factors:
+        issue_cautions.append("오늘 핵심 토픽과 이 종목의 섹터·산업 사이에서 뚜렷한 직접 연결을 찾지 못했습니다.")
+    if issue_score > 0 and technical_score < 0:
+        issue_cautions.append("이슈 환경은 우호적이지만 최근 가격·기술 흐름은 반대 방향입니다.")
+    elif issue_score < 0 and technical_score > 0:
+        issue_cautions.append("이슈 환경은 부담 요인이 있지만 최근 가격·기술 흐름은 상대적으로 강합니다.")
+
+    position_return = _num(position.get("return_pct"))
+    if position_return is not None:
+        exposure_basis.append(f"입력한 평균 매수가 대비 평가수익률 {position_return:+.2f}%도 검토 의견에 참고합니다.")
+
+    summary = (
+        f"오늘 시장 이슈의 섹터 노출 점수 {issue_score:+.2f}, 최근 가격·기술 흐름 점수 {technical_score:+.2f}를 합산한 "
+        f"참고 점수는 {combined:+.2f}입니다. 현재는 {direction}, 검토 의견은 {stance}입니다."
+    )
+    return {
+        "symbol": snapshot.get("symbol"),
+        "direction": direction,
+        "stance": stance,
+        "confidence": confidence,
+        "combined_score": combined,
+        "issue_score": issue_score,
+        "technical_score": technical_score,
+        "summary": summary,
+        "issue_reasons": issue_reasons[:4],
+        "issue_cautions": issue_cautions[:4],
+        "technical_positive": technical_positive[:4],
+        "technical_caution": technical_caution[:4],
+        "factors": factors[:6],
+        "exposure_basis": exposure_basis[:4],
+        "market_fetched_at": market.get("fetched_at"),
+        "sample_size": int(market.get("sample_size") or len(market.get("items") or [])),
+    }, (
+        "오늘 이슈와 섹터 노출, 가격·기술지표를 규칙 기반으로 결합한 참고 분석입니다. "
+        "상승·하락 압력은 미래 가격 예측이나 매매 지시가 아닙니다."
+    )
+
 def generate_dashboard_brief(snapshot: dict) -> tuple[dict | None, str | None]:
     if not isinstance(snapshot, dict):
         return None, "분석 자료 형식이 올바르지 않습니다."
