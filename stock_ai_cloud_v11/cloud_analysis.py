@@ -755,9 +755,10 @@ def _technical_pressure(snapshot: dict) -> tuple[float, list[str], list[str], in
 
 
 def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | None, str | None]:
-    """Connect today's market topics to one selected stock/ETF and its price trend.
+    """Detailed selected-instrument review using market issues, price trend and stock news.
 
-    The result is a review aid, not a price forecast or trading instruction.
+    The output is a research aid. Direction labels summarize the balance of the
+    supplied evidence and are not a guarantee of future price movement.
     """
     if not isinstance(snapshot, dict) or not isinstance(market, dict):
         return None, "이슈 기반 분석 자료 형식이 올바르지 않습니다."
@@ -794,13 +795,53 @@ def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | No
 
     issue_score = max(-3.0, min(3.0, issue_score))
     factors.sort(key=lambda x: abs(x["contribution"]), reverse=True)
-    technical_score, technical_positive, technical_caution, technical_evidence = _technical_pressure(snapshot)
-    combined = max(-5.0, min(5.0, issue_score + technical_score))
 
-    if combined >= 1.5:
-        direction = "상승 압력 우세"
-    elif combined <= -1.5:
-        direction = "하락 압력 우세"
+    technical_score, technical_positive, technical_caution, technical_evidence = _technical_pressure(snapshot)
+
+    # Stock-specific news is an independent evidence axis. Only headline wording
+    # is scored, so its contribution is deliberately smaller than issue/price axes.
+    stock_news = (snapshot.get("news") or {}).get("items") or []
+    news_positive_count = 0
+    news_negative_count = 0
+    news_neutral_count = 0
+    news_ids: list[str] = []
+    news_positive: list[str] = []
+    news_caution: list[str] = []
+    for item in stock_news[:12]:
+        title = str(item.get("title") or "").strip()
+        folded = title.casefold()
+        pos = sum(1 for term in _POSITIVE if term in folded)
+        neg = sum(1 for term in _NEGATIVE if term in folded)
+        if pos > neg:
+            news_positive_count += 1
+            if len(news_positive) < 3 and title:
+                news_positive.append(f"긍정 표현이 상대적으로 많은 헤드라인: {title}")
+        elif neg > pos:
+            news_negative_count += 1
+            if len(news_caution) < 3 and title:
+                news_caution.append(f"부정·경계 표현이 상대적으로 많은 헤드라인: {title}")
+        else:
+            news_neutral_count += 1
+        if item.get("id"):
+            news_ids.append(str(item["id"]))
+
+    directional_news = news_positive_count + news_negative_count
+    raw_news_net = news_positive_count - news_negative_count
+    news_score = max(-1.2, min(1.2, raw_news_net * 0.28))
+    if directional_news < 2:
+        news_score *= 0.5
+    if raw_news_net >= 2:
+        news_direction = "긍정 헤드라인 우세"
+    elif raw_news_net <= -2:
+        news_direction = "부정 헤드라인 우세"
+    else:
+        news_direction = "뉴스 방향 혼재"
+
+    combined = max(-6.0, min(6.0, issue_score + technical_score + news_score))
+    if combined >= 1.6:
+        direction = "상승 우세"
+    elif combined <= -1.6:
+        direction = "하락 우세"
     else:
         direction = "혼조·중립"
 
@@ -808,22 +849,22 @@ def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | No
     signal_codes = {x.get("code") for x in (position.get("signals") or []) if isinstance(x, dict)}
     if "profit_review" in signal_codes and combined < 1.0:
         stance = "매도 검토"
-    elif combined >= 2.1:
+    elif combined >= 2.3:
         stance = "매수 검토"
-    elif combined <= -2.1:
+    elif combined <= -2.3:
         stance = "매도 검토"
     elif position:
         stance = "보유 검토"
     else:
         stance = "관망"
 
-    evidence_count = len(factors) + technical_evidence
+    evidence_count = len(factors) + technical_evidence + min(len(stock_news), 4)
     magnitude = abs(combined)
-    confidence = "높음" if evidence_count >= 6 and magnitude >= 2.5 else "중간" if evidence_count >= 3 and magnitude >= 1.2 else "낮음"
+    confidence = "높음" if evidence_count >= 8 and magnitude >= 2.7 else "중간" if evidence_count >= 4 and magnitude >= 1.2 else "낮음"
 
-    issue_reasons = []
-    issue_cautions = []
-    for item in factors[:5]:
+    issue_reasons: list[str] = []
+    issue_cautions: list[str] = []
+    for item in factors[:6]:
         matched = item["matched_benefits"] if item["contribution"] > 0 else item["matched_risks"]
         label_text = ", ".join(matched) if matched else "선택 종목의 섹터 노출"
         sentence = (
@@ -838,14 +879,18 @@ def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | No
         issue_cautions.append("이슈 환경은 우호적이지만 최근 가격·기술 흐름은 반대 방향입니다.")
     elif issue_score < 0 and technical_score > 0:
         issue_cautions.append("이슈 환경은 부담 요인이 있지만 최근 가격·기술 흐름은 상대적으로 강합니다.")
+    if news_score > 0 and combined < 0:
+        news_caution.append("종목 뉴스 표현은 우호적이지만 다른 이슈·가격 지표가 이를 상쇄하고 있습니다.")
+    elif news_score < 0 and combined > 0:
+        news_caution.append("종목 뉴스에는 경계 표현이 있으나 이슈·가격 흐름은 상대적으로 강합니다.")
 
     position_return = _num(position.get("return_pct"))
     if position_return is not None:
-        exposure_basis.append(f"입력한 평균 매수가 대비 평가수익률 {position_return:+.2f}%도 검토 의견에 참고합니다.")
+        exposure_basis.append(f"입력한 평균 매수가 대비 평가수익률 {position_return:+.2f}%도 매매 검토 의견에 참고합니다.")
 
     summary = (
-        f"오늘 시장 이슈의 섹터 노출 점수 {issue_score:+.2f}, 최근 가격·기술 흐름 점수 {technical_score:+.2f}를 합산한 "
-        f"참고 점수는 {combined:+.2f}입니다. 현재는 {direction}, 검토 의견은 {stance}입니다."
+        f"오늘 이슈·섹터 {issue_score:+.2f}, 가격·기술 {technical_score:+.2f}, 종목 뉴스 {news_score:+.2f}를 합산한 "
+        f"참고 점수는 {combined:+.2f}입니다. 현재 가격 방향 전망은 {direction}, 매매 판단은 {stance}입니다."
     )
     return {
         "symbol": snapshot.get("symbol"),
@@ -855,18 +900,27 @@ def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | No
         "combined_score": combined,
         "issue_score": issue_score,
         "technical_score": technical_score,
+        "news_score": news_score,
+        "news_direction": news_direction,
+        "news_positive_count": news_positive_count,
+        "news_negative_count": news_negative_count,
+        "news_neutral_count": news_neutral_count,
         "summary": summary,
-        "issue_reasons": issue_reasons[:4],
-        "issue_cautions": issue_cautions[:4],
-        "technical_positive": technical_positive[:4],
-        "technical_caution": technical_caution[:4],
-        "factors": factors[:6],
-        "exposure_basis": exposure_basis[:4],
+        "issue_reasons": issue_reasons[:5],
+        "issue_cautions": issue_cautions[:5],
+        "technical_positive": technical_positive[:5],
+        "technical_caution": technical_caution[:5],
+        "news_positive": news_positive[:3],
+        "news_caution": news_caution[:4],
+        "factors": factors[:8],
+        "exposure_basis": exposure_basis[:5],
+        "news_ids": news_ids[:6],
         "market_fetched_at": market.get("fetched_at"),
         "sample_size": int(market.get("sample_size") or len(market.get("items") or [])),
+        "stock_news_count": len(stock_news),
     }, (
-        "오늘 이슈와 섹터 노출, 가격·기술지표를 규칙 기반으로 결합한 참고 분석입니다. "
-        "상승·하락 압력은 미래 가격 예측이나 매매 지시가 아닙니다."
+        "오늘 이슈·섹터 노출, 가격·기술지표, 종목별 뉴스 제목을 규칙 기반으로 결합한 참고 분석입니다. "
+        "상승·하락 전망과 매매 검토는 미래 수익을 보장하거나 주문을 지시하지 않습니다."
     )
 
 def generate_dashboard_brief(snapshot: dict) -> tuple[dict | None, str | None]:
