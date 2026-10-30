@@ -734,6 +734,10 @@ def _sector_list_html(values, limit=4):
         normalized = [values]
     elif isinstance(values, (list, tuple, set)):
         normalized = list(values)
+        # Old analysis results may already be corrupted into character arrays,
+        # e.g. ["은", "행", "·", "보", "험"]. Rejoin those before limiting rows.
+        if len(normalized) >= 2 and all(isinstance(x, str) and len(x) == 1 for x in normalized):
+            normalized = ["".join(normalized)]
     else:
         normalized = [values]
 

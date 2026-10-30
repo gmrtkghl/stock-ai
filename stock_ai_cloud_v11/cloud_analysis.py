@@ -56,9 +56,9 @@ _SECTOR_RULES = {
         "down_terms": ("금리 인상", "금리인상", "긴축", "매파", "higher for longer", "rate hike", "hawkish", "tightening"),
         "up_label": "금리 인하·완화 기대",
         "up_benefit": ("IT·성장주", "리츠·부동산", "경기소비재"),
-        "up_risk": ("은행 예대마진 민감주"),
+        "up_risk": ("은행 예대마진 민감주",),
         "down_label": "금리 인상·긴축 우려",
-        "down_benefit": ("은행·보험"),
+        "down_benefit": ("은행·보험",),
         "down_risk": ("IT·성장주", "리츠·부동산", "고부채 경기소비재"),
         "why": "금리 변화는 할인율과 자금조달비용을 통해 성장주·부동산·금융 업종의 상대 매력에 영향을 줄 수 있습니다.",
     },
@@ -70,7 +70,7 @@ _SECTOR_RULES = {
         "up_risk": ("항공", "원자재 수입 비중이 큰 내수·유통"),
         "down_label": "달러 약세·원화 강세",
         "down_benefit": ("항공", "유통·내수", "원자재 수입형 제조"),
-        "down_risk": ("원화 환산 효과가 큰 수출주"),
+        "down_risk": ("원화 환산 효과가 큰 수출주",),
         "why": "환율은 수출기업의 원화 환산 실적과 수입 원가, 외국인 수급 경로에 동시에 작용할 수 있습니다.",
     },
     "물가·인플레이션": {
@@ -78,7 +78,7 @@ _SECTOR_RULES = {
         "down_terms": ("물가 상승", "인플레이션 가속", "cpi hot", "inflation rises", "sticky inflation", "물가 압력"),
         "up_label": "물가 둔화·안정",
         "up_benefit": ("IT·성장주", "경기소비재", "리츠·부동산"),
-        "up_risk": ("인플레이션 헤지 성격 자산"),
+        "up_risk": ("인플레이션 헤지 성격 자산",),
         "down_label": "물가 재상승·고착",
         "down_benefit": ("에너지·원자재 일부", "가격전가력이 높은 방어주"),
         "down_risk": ("IT·성장주", "경기소비재", "리츠·부동산"),
@@ -89,9 +89,9 @@ _SECTOR_RULES = {
         "down_terms": ("수요 둔화", "공급과잉", "수출 제한", "규제", "감산", "부진", "weak demand", "export restriction", "ban", "slump", "miss"),
         "up_label": "AI·반도체 수요/투자 확대",
         "up_benefit": ("반도체", "반도체 장비", "데이터센터", "전력기기·전력인프라"),
-        "up_risk": ("밸류에이션 부담이 큰 일부 고평가 성장주"),
+        "up_risk": ("밸류에이션 부담이 큰 일부 고평가 성장주",),
         "down_label": "AI·반도체 수요 둔화/규제",
-        "down_benefit": ("통신·필수소비재 등 방어주"),
+        "down_benefit": ("통신·필수소비재 등 방어주",),
         "down_risk": ("반도체", "반도체 장비", "데이터센터 관련주"),
         "why": "AI 투자와 메모리·GPU 수요는 반도체 공급망과 데이터센터 전력 인프라에 연쇄적으로 영향을 줄 수 있습니다.",
     },
@@ -100,7 +100,7 @@ _SECTOR_RULES = {
         "down_terms": ("하락", "약세", "급락", "조정", "selloff", "stocks fall", "slump", "drops"),
         "up_label": "위험선호·증시 강세",
         "up_benefit": ("IT·성장주", "증권", "경기소비재"),
-        "up_risk": ("일부 방어주 상대수익률"),
+        "up_risk": ("일부 방어주 상대수익률",),
         "down_label": "위험회피·증시 약세",
         "down_benefit": ("필수소비재", "통신", "유틸리티 등 방어주"),
         "down_risk": ("고베타 성장주", "증권", "경기민감주"),
@@ -111,7 +111,7 @@ _SECTOR_RULES = {
         "down_terms": ("관세 인상", "관세 부과", "무역전쟁", "수출 규제", "tariff hike", "new tariffs", "trade war", "export controls", "sanctions"),
         "up_label": "무역 긴장 완화",
         "up_benefit": ("반도체·자동차 등 수출주", "산업재", "물류"),
-        "up_risk": ("무역갈등 수혜 대체재 일부"),
+        "up_risk": ("무역갈등 수혜 대체재 일부",),
         "down_label": "관세·무역갈등 확대",
         "down_benefit": ("방산", "현지 대체생산·국산화 관련주"),
         "down_risk": ("수출주", "산업재", "글로벌 공급망 민감주"),
@@ -122,9 +122,9 @@ _SECTOR_RULES = {
         "down_terms": ("경기 둔화", "침체", "부동산 위기", "소비 부진", "slowdown", "property crisis", "weak demand", "deflation"),
         "up_label": "중국 경기 부양·회복",
         "up_benefit": ("화학·소재", "산업재", "반도체", "중국 소비 노출주"),
-        "up_risk": ("중국 경기 방어형 포지션"),
+        "up_risk": ("중국 경기 방어형 포지션",),
         "down_label": "중국 경기 둔화",
-        "down_benefit": ("통신·필수소비재 등 방어주"),
+        "down_benefit": ("통신·필수소비재 등 방어주",),
         "down_risk": ("화학·소재", "산업재", "중국 소비 노출주"),
         "why": "중국 수요는 한국의 소재·산업재·반도체 수출과 아시아 위험선호에 영향을 줄 수 있습니다.",
     },
@@ -136,7 +136,7 @@ _SECTOR_RULES = {
         "up_risk": ("항공", "운송", "화학·원가민감 제조"),
         "down_label": "유가 하락",
         "down_benefit": ("항공", "운송", "화학·원가민감 제조"),
-        "down_risk": ("정유·에너지 생산"),
+        "down_risk": ("정유·에너지 생산",),
         "why": "유가 변화는 에너지 기업의 판매단가와 운송·제조업의 연료·원재료 비용을 반대 방향으로 움직일 수 있습니다.",
     },
     "채권·국채": {
@@ -144,9 +144,9 @@ _SECTOR_RULES = {
         "down_terms": ("금리 상승", "국채금리 상승", "yield rises", "yields rise", "bond selloff"),
         "up_label": "국채금리 하락",
         "up_benefit": ("IT·성장주", "리츠·부동산", "장기채"),
-        "up_risk": ("은행 예대마진 민감주"),
+        "up_risk": ("은행 예대마진 민감주",),
         "down_label": "국채금리 상승",
-        "down_benefit": ("은행·보험 일부"),
+        "down_benefit": ("은행·보험 일부",),
         "down_risk": ("IT·성장주", "리츠·부동산", "장기채"),
         "why": "국채금리는 주식 할인율과 대출·조달금리의 기준 역할을 하므로 성장주와 금융·부동산에 파급될 수 있습니다.",
     },
@@ -155,10 +155,10 @@ _SECTOR_RULES = {
         "down_terms": ("실적 부진", "어닝 쇼크", "적자", "miss", "misses", "cuts guidance", "weak earnings", "profit warning"),
         "up_label": "실적 상향·호조",
         "up_benefit": ("실적 개선이 집중된 해당 업종", "증권·시장 거래활동 관련주"),
-        "up_risk": ("실적 기대가 과도하게 선반영된 업종"),
+        "up_risk": ("실적 기대가 과도하게 선반영된 업종",),
         "down_label": "실적 하향·부진",
-        "down_benefit": ("필수소비재·통신 등 방어주"),
-        "down_risk": ("실적 하향이 집중된 해당 업종"),
+        "down_benefit": ("필수소비재·통신 등 방어주",),
+        "down_risk": ("실적 하향이 집중된 해당 업종",),
         "why": "실적 뉴스는 업종 전체보다 실제 발표 기업과 동종업계에 더 직접적인 영향을 줄 수 있어 원문 확인이 중요합니다.",
     },
     "지정학": {
@@ -166,7 +166,7 @@ _SECTOR_RULES = {
         "down_terms": ("공격", "전쟁", "충돌", "제재", "미사일", "war", "attack", "escalation", "sanctions", "missile"),
         "up_label": "지정학적 긴장 완화",
         "up_benefit": ("항공·여행", "경기민감주", "물류"),
-        "up_risk": ("방산·에너지 위험프리미엄"),
+        "up_risk": ("방산·에너지 위험프리미엄",),
         "down_label": "지정학적 긴장 고조",
         "down_benefit": ("방산", "에너지", "금 등 안전자산 관련"),
         "down_risk": ("항공·여행", "운송", "경기민감주"),
@@ -177,9 +177,9 @@ _SECTOR_RULES = {
         "down_terms": ("수출 감소", "수출 둔화", "수출 부진", "exports fall", "weak exports", "export slowdown"),
         "up_label": "한국 수출 회복·증가",
         "up_benefit": ("반도체", "자동차", "조선·기계", "산업재"),
-        "up_risk": ("수출 경쟁 심화에 노출된 일부 내수 대체 업종"),
+        "up_risk": ("수출 경쟁 심화에 노출된 일부 내수 대체 업종",),
         "down_label": "한국 수출 둔화",
-        "down_benefit": ("통신·필수소비재 등 내수 방어주"),
+        "down_benefit": ("통신·필수소비재 등 내수 방어주",),
         "down_risk": ("반도체", "자동차", "조선·기계", "산업재"),
         "why": "한국 수출은 제조업 가동률과 대형 수출기업 실적 기대에 직접 연결되는 경우가 많습니다.",
     },
@@ -188,9 +188,9 @@ _SECTOR_RULES = {
         "down_terms": ("판매 감소", "수요 둔화", "리콜", "보조금 축소", "sales fall", "weak demand", "recall", "subsidy cut"),
         "up_label": "자동차·배터리 수요 개선",
         "up_benefit": ("자동차", "2차전지", "자동차부품"),
-        "up_risk": ("가격경쟁이 심한 저마진 업체"),
+        "up_risk": ("가격경쟁이 심한 저마진 업체",),
         "down_label": "자동차·배터리 수요 둔화",
-        "down_benefit": ("필수소비재·통신 등 방어주"),
+        "down_benefit": ("필수소비재·통신 등 방어주",),
         "down_risk": ("자동차", "2차전지", "자동차부품"),
         "why": "판매량·보조금·원재료 가격 변화는 완성차와 배터리 공급망의 가동률 및 마진에 영향을 줄 수 있습니다.",
     },
@@ -203,6 +203,24 @@ def _num(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _sector_values(value: Any) -> tuple[str, ...]:
+    """Normalize sector rule values so a single string is never split into characters."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        return (text,) if text else ()
+    if isinstance(value, (list, tuple, set)):
+        result = []
+        for item in value:
+            text = str(item or "").strip()
+            if text:
+                result.append(text)
+        return tuple(result)
+    text = str(value).strip()
+    return (text,) if text else ()
 
 
 def _sentiment(items: list[dict]) -> tuple[int, list[str]]:
@@ -395,8 +413,8 @@ def _sector_impact_for_topic(bucket: dict, region: str, topic_name: str) -> dict
         "coverage_pct": float(topic.get("coverage_pct") or 0),
         "signal": signal,
         "confidence": confidence,
-        "beneficiary_sectors": list(beneficiaries),
-        "risk_sectors": list(risks),
+        "beneficiary_sectors": list(_sector_values(beneficiaries)),
+        "risk_sectors": list(_sector_values(risks)),
         "rationale": rule["why"],
         "basis": basis,
         "news_ids": evidence_ids[:4] or list(topic.get("item_ids") or [])[:4],
