@@ -6,3 +6,4 @@ plotly==6.9.0
 requests>=2.32,<3
 tzdata>=2025.1
 streamlit-local-storage==0.0.25
+pykrx==1.2.9

@@ -846,10 +846,21 @@ def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | No
     else:
         news_direction = "뉴스 방향 혼재"
 
-    combined = max(-6.0, min(6.0, issue_score + technical_score + news_score))
-    if combined >= 1.6:
+    factor_screen = snapshot.get("factor_screen") or {}
+    raw_factor_score = _num(factor_screen.get("score")) if factor_screen.get("applicable") else 0.0
+    raw_factor_score = raw_factor_score or 0.0
+    # Fundamentals/quality/flow are deliberately capped so they influence, but do
+    # not overwhelm, current issue and price evidence.
+    factor_score = max(-1.2, min(2.5, raw_factor_score * 0.85))
+    factor_positive = list(factor_screen.get("positive") or [])[:6]
+    factor_caution = list(factor_screen.get("caution") or [])[:6]
+    factor_missing = list(factor_screen.get("missing") or [])[:6]
+    factor_labels = list(factor_screen.get("labels") or [])[:4]
+
+    combined = max(-8.0, min(8.0, issue_score + technical_score + news_score + factor_score))
+    if combined >= 1.8:
         direction = "상승 우세"
-    elif combined <= -1.6:
+    elif combined <= -1.8:
         direction = "하락 우세"
     else:
         direction = "혼조·중립"
@@ -858,18 +869,19 @@ def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | No
     signal_codes = {x.get("code") for x in (position.get("signals") or []) if isinstance(x, dict)}
     if "profit_review" in signal_codes and combined < 1.0:
         stance = "매도 검토"
-    elif combined >= 2.3:
+    elif combined >= 2.6:
         stance = "매수 검토"
-    elif combined <= -2.3:
+    elif combined <= -2.6:
         stance = "매도 검토"
     elif position:
         stance = "보유 검토"
     else:
         stance = "관망"
 
-    evidence_count = len(factors) + technical_evidence + min(len(stock_news), 4)
+    factor_evidence = int(factor_screen.get("evidence_count") or 0) if factor_screen.get("applicable") else 0
+    evidence_count = len(factors) + technical_evidence + min(len(stock_news), 4) + min(factor_evidence, 4)
     magnitude = abs(combined)
-    confidence = "높음" if evidence_count >= 8 and magnitude >= 2.7 else "중간" if evidence_count >= 4 and magnitude >= 1.2 else "낮음"
+    confidence = "높음" if evidence_count >= 10 and magnitude >= 3.0 else "중간" if evidence_count >= 5 and magnitude >= 1.3 else "낮음"
 
     issue_reasons: list[str] = []
     issue_cautions: list[str] = []
@@ -898,8 +910,9 @@ def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | No
         exposure_basis.append(f"입력한 평균 매수가 대비 평가수익률 {position_return:+.2f}%도 매매 검토 의견에 참고합니다.")
 
     summary = (
-        f"오늘 이슈·섹터 {issue_score:+.2f}, 가격·기술 {technical_score:+.2f}, 종목 뉴스 {news_score:+.2f}를 합산한 "
-        f"참고 점수는 {combined:+.2f}입니다. 현재 가격 방향 전망은 {direction}, 매매 판단은 {stance}입니다."
+        f"오늘 이슈·섹터 {issue_score:+.2f}, 가격·기술 {technical_score:+.2f}, 종목 뉴스 {news_score:+.2f}, "
+        f"성장·퀄리티·수급 {factor_score:+.2f}를 합산한 참고 점수는 {combined:+.2f}입니다. "
+        f"현재 가격 방향 전망은 {direction}, 매매 판단은 {stance}입니다."
     )
     return {
         "symbol": snapshot.get("symbol"),
@@ -910,6 +923,12 @@ def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | No
         "issue_score": issue_score,
         "technical_score": technical_score,
         "news_score": news_score,
+        "factor_score": factor_score,
+        "factor_labels": factor_labels,
+        "factor_positive": factor_positive,
+        "factor_caution": factor_caution,
+        "factor_missing": factor_missing,
+        "factor_screen": factor_screen,
         "news_direction": news_direction,
         "news_positive_count": news_positive_count,
         "news_negative_count": news_negative_count,
@@ -928,7 +947,7 @@ def generate_issue_stock_review(snapshot: dict, market: dict) -> tuple[dict | No
         "sample_size": int(market.get("sample_size") or len(market.get("items") or [])),
         "stock_news_count": len(stock_news),
     }, (
-        "오늘 이슈·섹터 노출, 가격·기술지표, 종목별 뉴스 제목을 규칙 기반으로 결합한 참고 분석입니다. "
+        "오늘 이슈·섹터 노출, 가격·기술지표, 종목별 뉴스, 재무·퀄리티·수급 필터를 규칙 기반으로 결합한 참고 분석입니다. "
         "상승·하락 전망과 매매 검토는 미래 수익을 보장하거나 주문을 지시하지 않습니다."
     )
 

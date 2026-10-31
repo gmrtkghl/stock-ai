@@ -23,6 +23,7 @@ import news_data as nd
 import portfolio as pf
 import cloud_analysis as cai
 import cloud_storage as cstore
+import factor_data as fdata
 from local_ai import explain_snapshot, generate_dashboard_brief, list_local_models
 from portfolio_view import render_portfolio_summary, render_position_editor
 
@@ -592,6 +593,11 @@ def fund_cached(symbol):
 @st.cache_data(ttl=900, show_spinner=False, max_entries=64)
 def news_cached(symbol, name):
     return nd.fetch_news(symbol, name=name, count=8, days=7)
+
+
+@st.cache_data(ttl=21600, show_spinner=False, max_entries=64)
+def factor_cached(symbol):
+    return fdata.fetch_factor_snapshot(symbol)
 
 
 @st.cache_data(ttl=900, show_spinner=False, max_entries=4)
@@ -1239,11 +1245,12 @@ def _research_hero_html(result):
 
 
 def _render_research_score_chart(result):
-    labels = ["오늘 이슈·섹터", "가격·기술", "종목 뉴스"]
+    labels = ["오늘 이슈·섹터", "가격·기술", "종목 뉴스", "성장·퀄리티·수급"]
     values = [
         float(result.get("issue_score") or 0),
         float(result.get("technical_score") or 0),
         float(result.get("news_score") or 0),
+        float(result.get("factor_score") or 0),
     ]
     colors = ["#2B7A66" if value >= 0 else "#B35A4A" for value in values]
     figure = go.Figure(go.Bar(
@@ -1257,7 +1264,7 @@ def _render_research_score_chart(result):
     ))
     bound = max(3.0, max((abs(v) for v in values), default=0) + .5)
     figure.update_layout(
-        height=235 if MOBILE_UI else 260,
+        height=280 if MOBILE_UI else 300,
         margin=dict(l=10, r=15, t=10, b=10),
         template="plotly_white",
         xaxis=dict(title="방향 점수 · +는 우호적 / -는 부담", range=[-bound, bound], zeroline=True),
@@ -1389,14 +1396,70 @@ def _render_research_issue_detail(result):
         st.info("오늘 핵심 토픽과 선택 종목의 섹터 사이에서 뚜렷한 직접 연결을 찾지 못했습니다.")
 
 
+def _fmt_market_cap(value):
+    if not is_number(value):
+        return "—"
+    number = float(value)
+    if number >= 1e12:
+        return f"{number / 1e12:.1f}조"
+    if number >= 1e9:
+        return f"{number / 1e9:.1f}십억"
+    if number >= 1e6:
+        return f"{number / 1e6:.1f}백만"
+    return f"{number:,.0f}"
+
+
+def _render_factor_screen(screen):
+    screen = screen or {}
+    st.subheader("재무·성장·퀄리티·수급 필터")
+    if not screen.get("applicable"):
+        st.info("ETF·지수이거나 재무 데이터가 부족해 개별기업 성장/퀄리티 필터는 적용하지 않았습니다.")
+        return
+    labels = screen.get("labels") or []
+    if labels:
+        st.markdown("  ·  ".join(f"**✅ {x}**" for x in labels))
+    else:
+        st.caption("현재 데이터로는 성장주·퀄리티·거래량/수급 조건을 동시에 충족한 카테고리가 없습니다.")
+
+    metrics = screen.get("metrics") or {}
+    row1 = st.columns(4)
+    row1[0].metric("매출 증가율", f"{float(metrics['revenue_growth_pct']):+.1f}%" if is_number(metrics.get("revenue_growth_pct")) else "—", delta_color="off")
+    row1[1].metric("영업이익 증가율", f"{float(metrics['operating_income_growth_pct']):+.1f}%" if is_number(metrics.get("operating_income_growth_pct")) else "—", delta_color="off")
+    row1[2].metric("ROE", f"{float(metrics['roe_pct']):.1f}%" if is_number(metrics.get("roe_pct")) else "—", delta_color="off")
+    row1[3].metric("PBR", f"{float(metrics['pbr']):.2f}배" if is_number(metrics.get("pbr")) else "—", delta_color="off")
+    row2 = st.columns(4)
+    row2[0].metric("배당수익률", f"{float(metrics['dividend_yield_pct']):.2f}%" if is_number(metrics.get("dividend_yield_pct")) else "—", delta_color="off")
+    eps_value = metrics.get("eps_revision_30d_pct") if is_number(metrics.get("eps_revision_30d_pct")) else metrics.get("eps_revision_90d_pct")
+    row2[1].metric("EPS 추정 변화", f"{float(eps_value):+.1f}%" if is_number(eps_value) else "—", delta_color="off")
+    row2[2].metric("거래량/5일 평균", f"{float(metrics['volume_ratio_pct']):.0f}%" if is_number(metrics.get("volume_ratio_pct")) else "—", delta_color="off")
+    row2[3].metric("시가총액", _fmt_market_cap(metrics.get("market_cap")), delta_color="off")
+
+    st.caption(
+        f"ROE 비교 기준 · {screen.get('roe_reference_label') or '시장평균 대체 기준'} "
+        f"{float(screen.get('roe_reference_pct') or 10):.1f}% · 성장주: 매출/영업이익 증가 + ROE 기준 + EPS 상향 · "
+        "퀄리티: ROE 기준 + 배당수익률 0.1% 이상 + PBR 1.5배 이하"
+    )
+    if metrics.get("market_group") == "KR":
+        flow_text = "외국인·기관 20일 동반 순매수 확인" if metrics.get("foreign_institution_both_positive") else "외국인·기관 20일 동반 순매수 미충족/미확인"
+        st.caption(f"한국주 수급 · {flow_text} · 출처 {metrics.get('flow_source') or '데이터 미확인'}")
+
+    with st.expander("팩터 근거와 미확인 데이터"):
+        for line in screen.get("positive") or []:
+            st.write(f"• 통과/우호 · {line}")
+        for line in screen.get("caution") or []:
+            st.write(f"• 경계 · {line}")
+        for line in screen.get("missing") or []:
+            st.write(f"• 미확인 · {line}")
+
+
 def _render_research_detailed_reasoning(result):
     st.subheader("상세 AI 분석")
     st.markdown(
         f'<div class="research-note"><strong>종합 판단</strong><br>{html.escape(str(result.get("summary") or "분석 요약이 없습니다."))}</div>',
         unsafe_allow_html=True,
     )
-    positive = (result.get("issue_reasons") or []) + (result.get("technical_positive") or []) + (result.get("news_positive") or [])
-    caution = (result.get("issue_cautions") or []) + (result.get("technical_caution") or []) + (result.get("news_caution") or [])
+    positive = (result.get("issue_reasons") or []) + (result.get("technical_positive") or []) + (result.get("news_positive") or []) + (result.get("factor_positive") or [])
+    caution = (result.get("issue_cautions") or []) + (result.get("technical_caution") or []) + (result.get("news_caution") or []) + (result.get("factor_caution") or [])
     cols = st.columns(2)
     with cols[0].container(border=True):
         st.markdown("**상승·매수/보유 쪽 근거**")
@@ -1572,7 +1635,7 @@ def render_ai_research_dashboard(active_symbols):
     header_cols = st.columns([3, 1])
     header_cols[0].caption("오늘의 이슈는 시장 전체를 빠르게 보고, 이 화면에서는 전체 종목 비교와 선택 종목 상세 분석을 함께 확인합니다.")
     if header_cols[1].button("분석 새로고침", width="stretch", key="research_refresh"):
-        history_cached.clear(); news_cached.clear(); market_brief_cached.clear(); fund_cached.clear(); quote_cached.clear()
+        history_cached.clear(); news_cached.clear(); market_brief_cached.clear(); fund_cached.clear(); quote_cached.clear(); factor_cached.clear()
         st.session_state.pop("research_ai_result", None)
         st.rerun()
 
@@ -1588,6 +1651,9 @@ def render_ai_research_dashboard(active_symbols):
             fund = fund_cached(fund_symbol)
         position = st.session_state.positions.get(selection)
         evaluated_position = pf.evaluate_position(position, q) if position else None
+        factor = factor_cached(selection) if kind == "stock" else {"symbol": selection, "applicable": False, "error": "ETF·지수는 개별기업 재무 필터 비대상"}
+        factor_refs = (st.session_state.get("buy_candidate_result") or {}).get("factor_references") or {}
+        factor_screen = _factor_screen_for(factor, history, references=factor_refs)
         snapshot = {
             "symbol": selection,
             "name": known.get("name") or profile.get("name") or selection,
@@ -1598,6 +1664,7 @@ def render_ai_research_dashboard(active_symbols):
             "analysis": summary,
             "position": evaluated_position,
             "news": news,
+            "factor_screen": factor_screen,
             "fund_sectors": (fund or {}).get("sectors") or {},
             "fund_composition": {
                 "symbol": fund_symbol,
@@ -1651,6 +1718,8 @@ def render_ai_research_dashboard(active_symbols):
 
     st.subheader("가격 추세와 기술지표")
     _render_research_price_chart(history, summary, currency, kind)
+
+    _render_factor_screen(result.get("factor_screen") or factor_screen)
 
     _render_research_issue_detail(result)
     _render_research_sector_detail(selection, profile, kind, fund)
@@ -1716,6 +1785,70 @@ def _rank_issue_sectors(market):
     return ranked[:8]
 
 
+def _factor_reference_from_rows(rows):
+    groups = {}
+    for row in rows:
+        factor = row.get("factor") or {}
+        if not factor.get("applicable"):
+            continue
+        group = str(factor.get("market_group") or "US_OR_OTHER")
+        bucket = groups.setdefault(group, {"roe": [], "cap": []})
+        if is_number(factor.get("roe_pct")):
+            bucket["roe"].append(float(factor["roe_pct"]))
+        if is_number(factor.get("market_cap")) and float(factor["market_cap"]) > 0:
+            bucket["cap"].append(float(factor["market_cap"]))
+
+    references = {}
+    for group in {"KR", "US_OR_OTHER", *groups.keys()}:
+        bucket = groups.get(group, {"roe": [], "cap": []})
+        roe_values = bucket["roe"]
+        cap_values = sorted(bucket["cap"])
+        if len(roe_values) >= 2:
+            roe_ref = sum(roe_values) / len(roe_values)
+            roe_label = "현재 같은 시장 후보군 ROE 평균"
+        else:
+            roe_ref = 10.0
+            roe_label = "시장평균 대체 기본 기준"
+        if cap_values:
+            mid = len(cap_values) // 2
+            cap_ref = cap_values[mid] if len(cap_values) % 2 else (cap_values[mid - 1] + cap_values[mid]) / 2
+        else:
+            cap_ref = None
+        references[group] = {
+            "roe_reference_pct": roe_ref,
+            "roe_reference_label": roe_label,
+            "market_cap_reference": cap_ref,
+        }
+    return references
+
+
+def _volume_signal_for_history(history):
+    if history is None or getattr(history, "empty", True):
+        return {}
+    try:
+        completed = md.completed_daily_history(history)
+    except Exception:
+        completed = history
+    return fdata.volume_spike_from_history(completed)
+
+
+def _factor_screen_for(factor, history, references=None):
+    factor = factor or {}
+    group = str(factor.get("market_group") or "US_OR_OTHER")
+    ref = (references or {}).get(group) or {
+        "roe_reference_pct": 10.0,
+        "roe_reference_label": "시장평균 대체 기본 기준",
+        "market_cap_reference": None,
+    }
+    return fdata.build_factor_screen(
+        factor,
+        roe_reference_pct=float(ref.get("roe_reference_pct") or 10.0),
+        roe_reference_label=str(ref.get("roe_reference_label") or "시장평균 대체 기본 기준"),
+        market_cap_reference=ref.get("market_cap_reference"),
+        volume_signal=_volume_signal_for_history(history),
+    )
+
+
 def _buy_candidate_symbol_review(symbol, position, market):
     known = KNOWN.get(symbol, {})
     profile = profile_cached(symbol)
@@ -1731,6 +1864,7 @@ def _buy_candidate_symbol_review(symbol, position, market):
         fund_symbol = "VOO" if symbol == "^GSPC" else symbol
         fund = fund_cached(fund_symbol)
     evaluated = pf.evaluate_position(position, quote) if position else None
+    factor = factor_cached(symbol) if kind == "stock" else {"symbol": symbol, "applicable": False, "error": "ETF·지수는 개별기업 재무 필터 비대상"}
     snapshot = {
         "symbol": symbol,
         "name": name,
@@ -1749,6 +1883,10 @@ def _buy_candidate_symbol_review(symbol, position, market):
             "asof": (fund or {}).get("asof"),
         } if fund_symbol else None,
     }
+    # First-pass screen uses a neutral fallback reference. The package function
+    # recomputes it against same-market candidates before ranking.
+    factor_screen = _factor_screen_for(factor, history, references=None)
+    snapshot["factor_screen"] = factor_screen
     result, warning = cai.generate_issue_stock_review(snapshot, market)
     return {
         "symbol": symbol,
@@ -1758,6 +1896,10 @@ def _buy_candidate_symbol_review(symbol, position, market):
         "profile": profile,
         "quote": quote,
         "summary": summary,
+        "factor": factor,
+        "factor_screen": factor_screen,
+        "snapshot": snapshot,
+        "history": history,
         "result": result,
         "warning": warning,
         "history_error": history_error,
@@ -1777,6 +1919,19 @@ def _generate_buy_candidate_package(active_symbols, market):
                     continue
                 if row.get("result"):
                     rows.append(row)
+
+    references = _factor_reference_from_rows(rows)
+    for row in rows:
+        factor_screen = _factor_screen_for(row.get("factor") or {}, row.get("history"), references=references)
+        row["factor_screen"] = factor_screen
+        snapshot = dict(row.get("snapshot") or {})
+        snapshot["factor_screen"] = factor_screen
+        result, warning = cai.generate_issue_stock_review(snapshot, market)
+        row["snapshot"] = snapshot
+        row["result"] = result
+        row["warning"] = warning
+        row.pop("history", None)
+
     rows.sort(key=lambda x: float((x.get("result") or {}).get("combined_score") or -99), reverse=True)
     return {
         "created": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"),
@@ -1784,6 +1939,7 @@ def _generate_buy_candidate_package(active_symbols, market):
         "symbols": list(active_symbols),
         "sectors": _rank_issue_sectors(market),
         "stocks": rows,
+        "factor_references": references,
     }
 
 
@@ -1846,9 +2002,15 @@ def render_buy_candidates_dashboard(active_symbols):
         "이 화면의 ‘추천’은 자동 주문이나 수익 보장이 아니라 매수 검토 후보를 좁히는 스크리닝입니다. "
         "섹터 점수는 확률이 아니며, 종목 후보는 현재 관심·보유 목록 안에서만 비교합니다."
     )
+    with st.expander("적용 중인 성장주·퀄리티·거래량/수급 기준"):
+        st.write("• 성장주 · 매출 증가, 영업이익 증가, ROE 비교기준 이상, 최근 1~3개월 EPS 추정치 상향을 우선 확인")
+        st.write("• 퀄리티 · ROE 비교기준 이상 + 배당수익률 0.1% 이상 + PBR 1.5배 이하")
+        st.write("• 중소형·거래량 · 같은 시장 후보군 시가총액 중앙값 이하 여부와 최근 완료 거래일 거래량이 직전 5거래일 평균의 200% 이상인지 확인")
+        st.write("• 한국주 수급 · 최근 약 20거래일 외국인과 기관 누적 순매수가 모두 플러스인지 확인")
+        st.caption("시장 전체 ROE 평균을 무료 데이터로 안정적으로 제공받지 못하는 경우 같은 시장의 현재 후보군 ROE 평균을 사용하고, 표본이 부족하면 10%를 대체 기준으로 사용합니다. 미확인 데이터는 감점하지 않습니다.")
 
     head = st.columns([3, 1])
-    head[0].caption("시장 뉴스 약 100건의 토픽 방향 → 섹터 영향 → 종목 가격·기술 → 종목 뉴스 순으로 후보를 좁힙니다.")
+    head[0].caption("시장 뉴스 약 100건의 토픽 방향 → 섹터 영향 → 성장·퀄리티·거래량/수급 → 가격·기술 → 종목 뉴스 순으로 후보를 좁힙니다.")
     refresh = head[1].button("후보 다시 분석", type="primary", width="stretch", key="buy_candidate_refresh")
 
     with st.spinner("오늘 이슈를 기준으로 추천 섹터를 계산하고 있습니다…"):
@@ -1917,7 +2079,9 @@ def render_buy_candidates_dashboard(active_symbols):
             "매매 검토": stance,
             "방향": result.get("direction") or "혼조·중립",
             "확신도": result.get("confidence") or "낮음",
+            "팩터": ", ".join((row.get("factor_screen") or {}).get("labels") or []) or "조건 일부/미확인",
             "종합점수": float(result.get("combined_score") or 0),
+            "재무·수급": float(result.get("factor_score") or 0),
             "20일": float(summary.get("return_20d_pct")) if is_number(summary.get("return_20d_pct")) else None,
             "당일": float(quote.get("change_pct")) if is_number(quote.get("change_pct")) else None,
         })
@@ -1927,6 +2091,7 @@ def render_buy_candidates_dashboard(active_symbols):
         hide_index=True,
         column_config={
             "종합점수": st.column_config.NumberColumn("종합점수", format="%+.2f"),
+            "재무·수급": st.column_config.NumberColumn("재무·수급", format="%+.2f"),
             "20일": st.column_config.NumberColumn("20일", format="%+.2f%%"),
             "당일": st.column_config.NumberColumn("당일", format="%+.2f%%"),
         },
@@ -1939,12 +2104,13 @@ def render_buy_candidates_dashboard(active_symbols):
             f"{rank}위 · {row.get('name') or row.get('symbol')} · {result.get('stance') or '관망'} · {result.get('direction') or '혼조·중립'}"
         ):
             st.write(result.get("summary") or "요약이 없습니다.")
-            score_cols = st.columns(3)
+            score_cols = st.columns(4)
             score_cols[0].metric("오늘 이슈·섹터", f"{float(result.get('issue_score') or 0):+.2f}", delta_color="off")
             score_cols[1].metric("가격·기술", f"{float(result.get('technical_score') or 0):+.2f}", delta_color="off")
             score_cols[2].metric("종목 뉴스", f"{float(result.get('news_score') or 0):+.2f}", delta_color="off")
-            positives = [*(result.get("issue_reasons") or []), *(result.get("technical_positive") or []), *(result.get("news_positive") or [])]
-            cautions = [*(result.get("issue_cautions") or []), *(result.get("technical_caution") or []), *(result.get("news_caution") or [])]
+            score_cols[3].metric("성장·퀄리티·수급", f"{float(result.get('factor_score') or 0):+.2f}", delta_color="off")
+            positives = [*(result.get("issue_reasons") or []), *(result.get("technical_positive") or []), *(result.get("news_positive") or []), *(result.get("factor_positive") or [])]
+            cautions = [*(result.get("issue_cautions") or []), *(result.get("technical_caution") or []), *(result.get("news_caution") or []), *(result.get("factor_caution") or [])]
             if positives:
                 st.markdown("**우호 근거**")
                 for line in positives[:6]:
@@ -1952,6 +2118,11 @@ def render_buy_candidates_dashboard(active_symbols):
             if cautions:
                 st.markdown("**경계요인**")
                 for line in cautions[:6]:
+                    st.write(f"• {line}")
+            missing_factor = result.get("factor_missing") or []
+            if missing_factor:
+                st.markdown("**이번 점수에서 제외된 미확인 데이터**")
+                for line in missing_factor[:5]:
                     st.write(f"• {line}")
             if row.get("held"):
                 st.caption("이 종목은 현재 보유 정보가 있어 신규 매수 후보와 구분해 표시합니다. 추가매수 여부는 보유 비중·평단·손실 허용범위를 별도로 확인하세요.")
@@ -2197,7 +2368,7 @@ with st.sidebar:
     refresh_minutes = st.select_slider("조회 간격", options=[1, 5, 10], value=5, format_func=lambda v: f"{v}분")
     st.caption("자동 갱신 설정은 시세 대시보드에서 사용합니다. 거래소·제공자의 시세 지연은 별도로 적용됩니다.")
     if st.button("자료 새로고침", width="stretch"):
-        quote_cached.clear(); quotes_batch_cached.clear(); profile_cached.clear(); history_cached.clear(); fund_cached.clear(); news_cached.clear(); market_brief_cached.clear()
+        quote_cached.clear(); quotes_batch_cached.clear(); profile_cached.clear(); history_cached.clear(); fund_cached.clear(); news_cached.clear(); market_brief_cached.clear(); factor_cached.clear()
         if hasattr(md, "clear_caches"):
             md.clear_caches()
         if hasattr(nd, "clear_caches"):
